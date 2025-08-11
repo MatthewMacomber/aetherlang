@@ -1,0 +1,7 @@
+# Simple Aether Test Program
+# Tests basic functionality
+
+(func main ()
+  (call print "Testing Aether compilation!")
+  (call print "Math test: 2 + 3 = 5")
+  (return 0))

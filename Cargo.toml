@@ -1,0 +1,92 @@
+[package]
+name = "aether-language"
+version = "0.1.0"
+edition = "2021"
+authors = ["Aether Language Team"]
+description = "A next-generation programming language designed for AI-native development"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/aether-lang/aether"
+keywords = ["programming-language", "ai", "compiler", "tensor", "machine-learning"]
+categories = ["compilers", "development-tools"]
+
+[dependencies]
+rand = { version = "0.8", features = ["std_rng"] }
+num_cpus = "1.16"
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+warp = "0.3"
+colored = "2.0"
+anyhow = "1.0"
+open = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+regex = "1.10"
+which = "4.0"
+tempfile = "3.8"
+thiserror = "1.0"
+toml = "0.8"
+log = "0.4"
+
+# Windows-specific dependencies
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "processenv", "winreg", "psapi", "tlhelp32"] }
+
+[features]
+default = []
+mlir = ["melior", "mlir-sys"]
+llvm = ["mlir"]
+
+[dependencies.melior]
+version = "0.18"
+optional = true
+
+[dependencies.mlir-sys]
+version = "0.2"
+optional = true
+
+# Build script for MLIR/LLVM linking
+[build-dependencies]
+bindgen = "0.69"
+cc = "1.0"
+pkg-config = "0.3"
+
+[dev-dependencies]
+tempfile = "3.8"
+proptest = "1.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
+
+[[bin]]
+name = "aetherc"
+path = "src/bin/aetherc.rs"
+
+[[bin]]
+name = "aetherfmt"
+path = "src/bin/aetherfmt.rs"
+
+[[bin]]
+name = "aether-analyze"
+path = "src/bin/aether_analyze.rs"
+
+[[bin]]
+name = "aether-playground"
+path = "src/bin/aether_playground.rs"
+
+[[bin]]
+name = "aether-test"
+path = "src/bin/aether_test.rs"
+
+[[bin]]
+name = "aether-workflow-cli"
+path = "src/bin/aether-workflow.rs"
+
+[[bin]]
+name = "aether-file-test"
+path = "src/bin/aether_file_test.rs"
+
+[lib]
+name = "aether_language"
+path = "src/lib.rs"

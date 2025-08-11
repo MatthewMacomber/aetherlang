@@ -1,0 +1,15 @@
+{
+  "current_stage": null,
+  "completed_stages": [],
+  "failed_stages": [
+    "EnvironmentValidation",
+    "EnvironmentValidation",
+    "EnvironmentValidation",
+    "EnvironmentValidation"
+  ],
+  "compiler_binary_path": null,
+  "compiled_files": [],
+  "last_error": null,
+  "timestamp": 1754376580,
+  "config_hash": 0
+}

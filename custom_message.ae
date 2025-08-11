@@ -1,0 +1,5 @@
+# Custom message test
+(func main ()
+  (call print "This is a custom message!")
+  (call print "Aether compiler is working correctly!")
+  (return 0))

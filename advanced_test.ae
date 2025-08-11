@@ -1,0 +1,42 @@
+# Advanced Aether Test Program
+# Tests tensor operations, automatic differentiation, and probabilistic programming
+
+(func tensor_demo ()
+  # Create tensors with shape information
+  (let a (tensor [2 3] [1.0 2.0 3.0 4.0 5.0 6.0]))
+  (let b (tensor [3 2] [0.5 1.5 2.5 3.5 4.5 5.5]))
+  
+  # Matrix multiplication with compile-time shape checking
+  (let c (matmul a b))
+  
+  # Automatic differentiation
+  (let grad_fn (autodiff.forward (lambda (x) (matmul x b))))
+  (let gradient (call grad_fn a))
+  
+  # Return result tensor
+  (return c))
+
+(func probabilistic_demo ()
+  # Probabilistic programming constructs
+  (let weight (sample (Normal 0.0 1.0)))
+  (let bias (sample (Normal 0.0 0.1)))
+  
+  # Linear model with uncertainty
+  (let prediction (+ (* weight 2.5) bias))
+  
+  # Observe data point
+  (observe prediction 5.2 (Normal prediction 0.5))
+  
+  # Return sampled weight
+  (return weight))
+
+(func main ()
+  # Test tensor operations
+  (let tensor_result (call tensor_demo))
+  (call print "Tensor computation complete")
+  
+  # Test probabilistic programming
+  (let prob_result (call probabilistic_demo))
+  (call print "Probabilistic inference complete")
+  
+  (return 0))

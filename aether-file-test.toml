@@ -1,0 +1,27 @@
+project_root = "."
+compiler_path = "./target/release/aetherc.exe"
+output_directory = "target/file_compilation_tests"
+test_directories = [
+    "examples",
+    "tests",
+]
+generate_additional_tests = true
+test_categories = [
+    "CoreLanguage",
+    "TypeSystem",
+    "AIFeatures",
+    "ErrorHandling",
+]
+report_format = "Console"
+cleanup_artifacts = true
+max_parallel_compilations = 4
+max_parallel_executions = 2
+verbose = true
+
+[compilation_timeout]
+secs = 30
+nanos = 0
+
+[execution_timeout]
+secs = 10
+nanos = 0

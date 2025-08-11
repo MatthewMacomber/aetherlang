@@ -1,0 +1,6 @@
+# Hello World Aether Program
+# Simple program to test basic compilation
+
+(func main ()
+  (call print "Hello, World from Aether!")
+  (return 0))
