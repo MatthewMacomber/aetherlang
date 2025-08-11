@@ -1,0 +1,271 @@
+﻿Below is a “straw-man” design for a language whose primary user is an LLM and whose secondary user is a human.
+
+
+It is meant to be compiled to native code, WASM, or JavaScript and to run inside browsers, game engines, or on bare metal.
+
+
+The working name is AICL (AI-Centric Language).
+
+
+────────────────────────────────────────
+1. Core Philosophy
+────────────────────────────────────────
+•  Token economy first.  The AST is stored as a flat sequence of 32-bit tokens; every keyword, operator, identifier, or literal is a single token.
+
+
+•  LLM-native syntax – the surface syntax is an S-expression-like DAG that is already tokenized; an LLM can predict the next token directly without worrying about layout rules.
+
+
+•  Zero-cost interop with C, C++, Rust, and JavaScript.
+
+
+•  Deterministic execution; no hidden allocations or GC pauses unless explicitly requested.
+
+
+•  Built-in tensor, differentiable, and probabilistic primitives (think “NumPy + JAX + Stan” as first-class citizens).
+
+
+────────────────────────────────────────
+2. Token Grammar (simplified)
+────────────────────────────────────────
+Token ::=  Keyword
+
+
+        |  OpCode
+
+
+        |  Literal
+
+
+        |  VarRef   # 21-bit index into a per-scope symbol table
+
+
+        |  NodeRef  # 21-bit index into the AST DAG
+
+
+        |  Meta     # 4-bit flags (pure, async, differentiable, etc.)
+
+
+An entire source file is therefore just `Vec<Token>` plus an auxiliary string table for human-readable names.
+
+
+The LLM can predict token-by-token with local coherence (no layout or indentation).
+
+
+────────────────────────────────────────
+3. Surface Syntax (human translator layer)
+────────────────────────────────────────
+Humans rarely hand-write the raw token stream.  Instead they write:
+
+
+```aicl
+# Human-readable layer (auto-compiled to tokens)
+
+
+module game 0.1.0
+
+
+struct Vec3 { x: f32, y: f32, z: f32 }
+
+
+fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 =
+    Vec3 { x = a.x + t*(b.x-a.x),
+           y = a.y + t*(b.y-a.y),
+           z = a.z + t*(b.z-a.z) }
+
+
+kernel particle_step(world: &mut World, dt: f32) -> diff {
+    for p in world.particles {
+        p.vel += world.gravity * dt;
+        p.pos += p.vel * dt;
+    }
+}
+```
+
+
+The compiler immediately lowers this to the token DAG; the LLM only ever deals with the DAG.
+
+
+────────────────────────────────────────
+4. AI-Native Features
+────────────────────────────────────────
+1.  First-class Tensors  
+    
+```
+    let x = tensor<f32>[256,256]  # dense, row-major
+    let y = sparse<tensor<f32>>[1_000_000, 1_000_000]  # CSR
+    ```
+
+
+2.  Automatic Differentiation  
+    
+```
+    fn loss(params: &Model) -> f32 = ...
+    let grads = ∇loss(model)  # reverse-mode AD
+    ```
+
+
+3.  Probabilistic blocks  
+    
+```
+    prob coin_flip() =
+        let θ ~ Beta(2,2)
+        observe θ in { Bernoulli(θ) }
+    ```
+
+
+4.  Neural Net DSL  
+    
+```
+    net MLP =
+        Dense(512, relu)
+        Dropout(0.1)
+        Dense(10, soft-max)
+    ```
+
+
+5.  Prompt-embeddable fragments
+
+
+    Any token DAG can be compressed to a 128-bit hash; at compile time you can do:  
+    
+```
+    import net #0x7fa3…b12e  # fetch a model from an IPFS hash
+    ```
+
+
+────────────────────────────────────────
+5. Concurrency & Determinism
+────────────────────────────────────────
+•  Data-parallel kernels (`kernel` keyword) compile to GPU compute shaders, WASM-SIMD, or Rayon.
+
+
+•  Actor model for distributed agents; messages are typed and serialized automatically.
+
+
+•  Deterministic replay – every random draw tags a seed; the runtime can snapshot and rewind.
+
+
+────────────────────────────────────────
+6. Game & Simulation API (std::sim)
+────────────────────────────────────────
+
+
+```
+struct World {
+    entities: &[Entity],
+    physics: PhysicsScene,
+    renderer: RenderGraph,
+}
+
+
+fn tick(world: &mut World, dt: f64) {
+    world.physics.step(dt);
+    world.renderer.submit(&world.entities);
+}
+```
+
+
+Provides built-in ECS, 3-D math, and bindings to WebGPU / Vulkan / Metal.
+
+
+────────────────────────────────────────
+7. Tooling & Ecosystem
+────────────────────────────────────────
+•  aiclc – the compiler.  Emits:
+    – Native ELF / Mach-O / PE
+
+
+    – WebAssembly + WebGPU
+
+
+    – JavaScript for quick web previews  
+
+
+•  aiclfmt – deterministic pretty-printer (LLM → human).
+
+
+•  aicl playground – browser REPL that streams the token DAG to the LLM.
+
+
+•  aicl-analyze – static analyzer that reports tensor shapes, memory footprint, and GPU occupancy before running.
+
+
+────────────────────────────────────────
+8. Interop Cheat-Sheet
+────────────────────────────────────────
+
+
+```
+extern "C" {
+    fn SDL_Init(flags: u32) -> i32;
+}
+
+
+#[wasm_bindgen]
+pub fn greet(name: &str) -> String {
+    format!("Hello {name}")
+}
+```
+
+
+────────────────────────────────────────
+9. Example: Tiny LLM-Hosted Web Game
+────────────────────────────────────────
+The LLM produces the token stream; the human only sees:
+
+
+```aicl
+# Generated by LLM
+module tiny_game
+
+
+use std::sim::*;
+use std::web::*;
+
+
+struct Ball { pos: Vec2, vel: Vec2 }
+
+
+kernel step(balls: &mut [Ball], dt: f32) {
+    for b in balls {
+        b.vel.y -= 9.8 * dt;
+        b.pos += b.vel * dt;
+        if b.pos.y < 0.0 { b.vel.y = -b.vel.y * 0.8; }
+    }
+}
+
+
+#[web_export]
+fn main() {
+    let mut balls = vec![Ball { pos: (0,5), vel: (3,0) }];
+    canvas::run_loop(move |dt| {
+        step(&mut balls, dt);
+        render_balls(&balls);
+    });
+}
+```
+
+
+`aicl build --target wasm32` produces a 30 KB `.wasm` + `.js` bundle ready for the browser.
+
+
+────────────────────────────────────────
+10. Future Work
+────────────────────────────────────────
+•  Token-level compression to cut prompt sizes in half.
+
+
+•  Auto-scheduler that chooses GPU vs CPU for every kernel based on a cost model.
+
+
+•  Verifiable determinism – a proof-carrying code backend that guarantees identical results across runs.
+
+
+────────────────────────────────────────
+TL;DR
+────────────────────────────────────────
+AICL is a token-centric, LLM-first, multi-target language that treats tensors, differentiation, concurrency, and game simulation as first-class primitives.
+
+
+Humans can read it through a mechanical translator, but the canonical source of truth is the flat token stream—perfect for direct generation by an AI model.

@@ -1,0 +1,335 @@
+# AI-Focused Canonical Syntax: Distributed AI Systems
+# Demonstrates canonical form for distributed training, inference, and coordination
+# Optimized for AI generation of scalable ML systems
+
+(module distributed_ai
+  
+  # Distributed data parallel training
+  (fn distributed_training ((model net) (dataset Tensor) (world_size i32) (rank i32))
+    # Initialize process group
+    (init_process_group "nccl" rank world_size)
+    
+    # Shard dataset across processes
+    (let local_data (shard dataset rank world_size))
+    (let local_loader (data_loader local_data (batch_size 32)))
+    
+    # Wrap model for distributed training
+    (let ddp_model (distributed_data_parallel model))
+    
+    # Training loop with gradient synchronization
+    (for epoch (range 100)
+      (for batch local_loader
+        # Forward pass
+        (let logits (forward ddp_model (get batch data)))
+        (let loss (cross_entropy logits (get batch labels)))
+        
+        # Backward pass - gradients automatically synchronized
+        (let grads (diff loss (params ddp_model)))
+        
+        # All-reduce gradients across processes
+        (all_reduce grads "sum")
+        (scale grads (/ 1.0 world_size))
+        
+        # Update parameters
+        (update_params ddp_model grads (lr 0.001))
+        
+        # Log progress from rank 0
+        (when (eq rank 0)
+          (print "Epoch:" epoch "Loss:" loss))))
+    
+    # Save model from rank 0
+    (when (eq rank 0)
+      (save ddp_model "distributed_model.ae")))
+  
+  # Model parallel training for large models
+  (fn model_parallel_training ((model_shards list) (dataset Tensor))
+    (let num_shards (length model_shards))
+    (let pipeline_stages (list))
+    
+    # Create pipeline stages
+    (for i (range num_shards)
+      (let stage
+        (fn ((input Tensor) (stage_id i32))
+          # Forward through this shard
+          (let shard_model (index model_shards stage_id))
+          (let output (forward shard_model input))
+          
+          # Send to next stage if not last
+          (when (< stage_id (- num_shards 1))
+            (send output (+ stage_id 1)))
+          
+          output))
+      (append pipeline_stages stage))
+    
+    # Pipeline training loop
+    (for batch (data_loader dataset 32)
+      (let micro_batches (split batch 4))  # Pipeline parallelism
+      
+      # Forward pass through pipeline
+      (for micro_batch micro_batches
+        (let stage_input micro_batch)
+        (for stage_id (range num_shards)
+          (let stage_fn (index pipeline_stages stage_id))
+          (set stage_input (stage_fn stage_input stage_id))))
+      
+      # Backward pass through pipeline (reverse order)
+      (for stage_id (reverse (range num_shards))
+        (let stage_grads (recv_gradients stage_id))
+        (let local_grads (compute_gradients stage_id stage_grads))
+        (update_stage_params stage_id local_grads))))
+  
+  # Federated learning coordination
+  (fn federated_learning ((clients list) (global_model net) (rounds i32))
+    (let server_state (init_server global_model))
+    
+    (for round (range rounds)
+      (print "Federated round:" round)
+      
+      # Select subset of clients
+      (let selected_clients (sample clients (min 10 (length clients))))
+      (let client_updates (list))
+      
+      # Parallel client training
+      (parallel_for client selected_clients
+        (let client_data (get client 'data))
+        (let local_model (copy global_model))
+        
+        # Local training
+        (for local_epoch (range 5)
+          (for batch (data_loader client_data 16)
+            (let loss (train_step local_model batch))
+            (when (eq (mod (get batch idx) 100) 0)
+              (print "Client:" (get client 'id) "Loss:" loss))))
+        
+        # Compute model update
+        (let update (subtract (params local_model) (params global_model)))
+        (append client_updates update))
+      
+      # Aggregate updates (FedAvg)
+      (let aggregated_update (mean client_updates))
+      (let new_params (+ (params global_model) aggregated_update))
+      (set_params global_model new_params)
+      
+      # Evaluate global model
+      (let accuracy (evaluate global_model test_data))
+      (print "Round:" round "Global accuracy:" accuracy))
+    
+    global_model)
+  
+  # Distributed inference serving
+  (fn distributed_inference ((model net) (request_queue queue))
+    (let worker_pool (list))
+    (let num_workers 8)
+    
+    # Create worker processes
+    (for i (range num_workers)
+      (let worker
+        (spawn
+          (fn ()
+            (let local_model (load_model_shard model i))
+            (loop
+              (let request (recv request_queue))
+              (let input (get request 'data))
+              (let result (forward local_model input))
+              (send (get request 'response_channel) result)))))
+      (append worker_pool worker))
+    
+    # Load balancer
+    (spawn
+      (fn ()
+        (let request_counter 0)
+        (loop
+          (let request (recv request_queue))
+          (let worker_id (mod request_counter num_workers))
+          (send (index worker_pool worker_id) request)
+          (set request_counter (+ request_counter 1))))))
+  
+  # Distributed hyperparameter optimization
+  (fn distributed_hyperopt ((search_space dict) (objective_fn fn) (num_trials i32))
+    (let trial_queue (queue))
+    (let result_queue (queue))
+    (let num_workers 16)
+    
+    # Generate trial configurations
+    (for trial (range num_trials)
+      (let config (sample_hyperparams search_space))
+      (send trial_queue (dict (trial_id trial) (config config))))
+    
+    # Worker processes
+    (for worker_id (range num_workers)
+      (spawn
+        (fn ()
+          (loop
+            (let trial (recv trial_queue))
+            (when trial
+              (let config (get trial 'config))
+              (let score (objective_fn config))
+              (send result_queue 
+                    (dict (trial_id (get trial 'trial_id))
+                          (config config)
+                          (score score))))))))
+    
+    # Collect results and update search strategy
+    (let best_score -inf)
+    (let best_config nil)
+    (let completed_trials 0)
+    
+    (while (< completed_trials num_trials)
+      (let result (recv result_queue))
+      (let score (get result 'score))
+      
+      (when (> score best_score)
+        (set best_score score)
+        (set best_config (get result 'config)))
+      
+      (set completed_trials (+ completed_trials 1))
+      (print "Trial" (get result 'trial_id) "Score:" score))
+    
+    (dict (best_config best_config) (best_score best_score)))
+  
+  # Distributed reinforcement learning
+  (fn distributed_rl ((env_factory fn) (agent_factory fn) (num_actors i32))
+    # Central learner
+    (let learner (spawn
+      (fn ()
+        (let global_agent (agent_factory))
+        (let replay_buffer (create_buffer 1000000))
+        
+        (loop
+          # Receive experiences from actors
+          (let experience (recv experience_queue))
+          (add_to_buffer replay_buffer experience)
+          
+          # Train on batch
+          (when (> (buffer_size replay_buffer) 10000)
+            (let batch (sample_batch replay_buffer 256))
+            (let loss (train_step global_agent batch))
+            
+            # Broadcast updated parameters
+            (broadcast (params global_agent) actor_channels))))))
+    
+    # Actor processes
+    (let actors (list))
+    (for actor_id (range num_actors)
+      (let actor (spawn
+        (fn ()
+          (let local_env (env_factory))
+          (let local_agent (agent_factory))
+          (let episode_buffer (list))
+          
+          (loop
+            # Sync with global agent periodically
+            (when (eq (mod (get_step) 1000) 0)
+              (let global_params (recv param_channel))
+              (set_params local_agent global_params))
+            
+            # Collect experience
+            (let state (reset local_env))
+            (let done false)
+            
+            (while (not done)
+              (let action (select_action local_agent state))
+              (let (next_state reward done) (step local_env action))
+              
+              (append episode_buffer 
+                      (dict (state state) (action action) 
+                            (reward reward) (next_state next_state) (done done)))
+              
+              (set state next_state))
+            
+            # Send experience to learner
+            (send experience_queue episode_buffer)
+            (clear episode_buffer)))))
+      (append actors actor))
+    
+    # Return handles for monitoring
+    (dict (learner learner) (actors actors)))
+  
+  # Distributed model serving with auto-scaling
+  (fn auto_scaling_inference ((model net) (min_replicas i32) (max_replicas i32))
+    (let current_replicas min_replicas)
+    (let replica_pool (list))
+    (let load_balancer (create_load_balancer))
+    
+    # Initialize minimum replicas
+    (for i (range min_replicas)
+      (let replica (spawn_inference_worker model i))
+      (append replica_pool replica)
+      (register_worker load_balancer replica))
+    
+    # Monitoring and scaling loop
+    (spawn
+      (fn ()
+        (loop
+          (sleep 30)  # Check every 30 seconds
+          
+          # Get current metrics
+          (let avg_latency (get_avg_latency load_balancer))
+          (let queue_length (get_queue_length load_balancer))
+          (let cpu_usage (get_avg_cpu_usage replica_pool))
+          
+          # Scale up conditions
+          (when (or (> avg_latency 100)  # 100ms threshold
+                    (> queue_length 50)   # Queue backlog
+                    (> cpu_usage 0.8))    # High CPU usage
+            (when (< current_replicas max_replicas)
+              (let new_replica (spawn_inference_worker model current_replicas))
+              (append replica_pool new_replica)
+              (register_worker load_balancer new_replica)
+              (set current_replicas (+ current_replicas 1))
+              (print "Scaled up to" current_replicas "replicas")))
+          
+          # Scale down conditions
+          (when (and (< avg_latency 50)   # Low latency
+                     (< queue_length 10)  # Small queue
+                     (< cpu_usage 0.3))   # Low CPU usage
+            (when (> current_replicas min_replicas)
+              (let replica_to_remove (pop replica_pool))
+              (unregister_worker load_balancer replica_to_remove)
+              (terminate replica_to_remove)
+              (set current_replicas (- current_replicas 1))
+              (print "Scaled down to" current_replicas "replicas"))))))
+    
+    load_balancer)
+  
+  # Main demonstration function
+  (fn main ()
+    (print "=== STARTING AI Canonical Distributed Systems Example ===")
+    
+    # Example 1: Distributed training setup
+    (print "Starting distributed training example...")
+    (let world_size 4)
+    (let rank (get_rank))
+    (let model (create_model))
+    (let dataset (load_dataset "imagenet"))
+    
+    (when (< rank world_size)
+      (distributed_training model dataset world_size rank))
+    (print "Distributed training example completed.")
+    
+    # Example 2: Federated learning simulation
+    (print "Starting federated learning example...")
+    (let clients (create_federated_clients 100))
+    (let global_model (create_model))
+    (let trained_model (federated_learning clients global_model 50))
+    (print "Federated learning example completed.")
+    
+    # Example 3: Distributed hyperparameter search
+    (print "Starting distributed hyperparameter optimization...")
+    (let search_space 
+      (dict (lr (uniform 0.0001 0.01))
+            (batch_size (choice [16 32 64 128]))
+            (hidden_dim (choice [256 512 1024]))))
+    
+    (let objective 
+      (fn ((config dict))
+        (let model (create_model config))
+        (let val_acc (train_and_evaluate model))
+        val_acc))
+    
+    (let best_config (distributed_hyperopt search_space objective 100))
+    (print "Best hyperparameters:" best_config)
+    (print "Distributed hyperparameter optimization completed.")
+    
+    (print "=== FINISHED AI Canonical Distributed Systems Example ===")
+    (return 0)))

@@ -1,0 +1,14 @@
+# Simple Math Example
+# Basic arithmetic operations in Aether
+
+(func main ()
+  (call print "=== STARTING Simple Math Example ===")
+  (let x 10)
+  (let y 5)
+  (let sum (+ x y))
+  (let product (* x y))
+  (call print "Sum:" sum)
+  (call print "Product:" product)
+  (call print "Math operations completed")
+  (call print "=== FINISHED Simple Math Example ===")
+  (return 0))

@@ -1,0 +1,14 @@
+# Simple Probabilistic Programming Example
+# Demonstrates basic probabilistic constructs
+
+fn main() -> i32 {
+    println!("=== STARTING Simple Probabilistic Programming Example ===")
+    
+    # Simple random number generation (placeholder)
+    let random_value = 42
+    
+    println!("Random value: {}", random_value)
+    
+    println!("=== FINISHED Simple Probabilistic Programming Example ===")
+    0
+}

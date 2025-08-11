@@ -1,0 +1,10 @@
+# Simple Function Test
+# Tests basic function definition and calling
+
+(func greet (name)
+  (call print (concat "Hello, " name "!"))
+  (return 0))
+
+(func main ()
+  (call greet "Aether")
+  (return 0))

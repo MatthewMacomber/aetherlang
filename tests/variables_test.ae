@@ -1,0 +1,13 @@
+# Variable Declaration Test
+# Tests basic variable declarations and assignments
+
+fn main() -> i32 {
+    let x = 42
+    let mut y = 10
+    y = y + 5
+    
+    println!("x = {}", x)
+    println!("y = {}", y)
+    
+    0
+}

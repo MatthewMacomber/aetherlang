@@ -1,0 +1,541 @@
+# Type System Example
+# Demonstrates advanced type system features including dependent types,
+# linear types, gradual typing, and compile-time computation
+
+use stdlib.types as types
+use stdlib.tensor as tensor
+
+# Dependent types for compile-time shape verification
+type Matrix<T, Rows: usize, Cols: usize> = Tensor<T, [Rows, Cols]>
+type Vector<T, Size: usize> = Tensor<T, [Size]>
+type Square<T, Size: usize> = Matrix<T, Size, Size>
+
+# Type-level computation for matrix operations
+type_fn MatMulResult<A: [usize; 2], B: [usize; 2]> -> [usize; 2] {
+    match (A, B) {
+        ([m, n], [p, q]) if n == p => [m, q],
+        _ => compile_error!("Matrix dimensions incompatible for multiplication")
+    }
+}
+
+# Linear types for resource management
+linear struct FileHandle {
+    path: String,
+    fd: i32
+}
+
+impl FileHandle {
+    # Constructor consumes the path string
+    fn open(path: linear String) -> Result<linear FileHandle, String> {
+        # Simulate file opening
+        Ok(FileHandle { path, fd: 42 })
+    }
+    
+    # Reading consumes and returns the handle (must be used)
+    fn read(self: linear FileHandle) -> (linear FileHandle, String) {
+        let content = format!("Content of {}", self.path)
+        (self, content)
+    }
+    
+    # Writing consumes and returns the handle
+    fn write(self: linear FileHandle, data: String) -> linear FileHandle {
+        println!("Writing to {}: {}", self.path, data)
+        self
+    }
+    
+    # Explicit close consumes the handle
+    fn close(self: linear FileHandle) {
+        println!("Closed file: {}", self.path)
+        # Handle is consumed and cannot be used again
+    }
+}
+
+# Gradual typing - mixing static and dynamic types
+struct GradualExample {
+    static_field: i32,
+    dynamic_field: dyn,  # Dynamic type
+    optional_field: Option<String>
+}
+
+impl GradualExample {
+    fn new(static_val: i32, dynamic_val: dyn) -> Self {
+        GradualExample {
+            static_field: static_val,
+            dynamic_field: dynamic_val,
+            optional_field: None
+        }
+    }
+    
+    # Method with gradual typing
+    fn process(&self, input: dyn) -> dyn {
+        # Runtime type checking
+        match input.type_of() {
+            Type::Int => {
+                let val = input.as::<i32>().unwrap()
+                (self.static_field + val).into_dyn()
+            }
+            Type::String => {
+                let val = input.as::<String>().unwrap()
+                format!("{}: {}", self.static_field, val).into_dyn()
+            }
+            Type::Array => {
+                let val = input.as::<Vec<dyn>>().unwrap()
+                val.len().into_dyn()
+            }
+            _ => "unknown".into_dyn()
+        }
+    }
+}
+
+# Phantom types for compile-time state tracking
+struct StateMachine<State> {
+    data: String,
+    _phantom: PhantomData<State>
+}
+
+# State types
+struct Initialized;
+struct Running;
+struct Stopped;
+
+impl StateMachine<Initialized> {
+    fn new(data: String) -> StateMachine<Initialized> {
+        StateMachine {
+            data,
+            _phantom: PhantomData
+        }
+    }
+    
+    fn start(self) -> StateMachine<Running> {
+        println!("Starting state machine with data: {}", self.data)
+        StateMachine {
+            data: self.data,
+            _phantom: PhantomData
+        }
+    }
+}
+
+impl StateMachine<Running> {
+    fn process(&mut self, input: String) {
+        self.data.push_str(&input)
+        println!("Processing: {}", input)
+    }
+    
+    fn stop(self) -> StateMachine<Stopped> {
+        println!("Stopping state machine")
+        StateMachine {
+            data: self.data,
+            _phantom: PhantomData
+        }
+    }
+}
+
+impl StateMachine<Stopped> {
+    fn get_result(self) -> String {
+        self.data
+    }
+    
+    fn restart(self) -> StateMachine<Running> {
+        println!("Restarting state machine")
+        StateMachine {
+            data: self.data,
+            _phantom: PhantomData
+        }
+    }
+}
+
+# Higher-kinded types for generic abstractions
+trait Functor<F<_>> {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>
+}
+
+trait Monad<M<_>>: Functor<M> {
+    fn pure<A>(value: A) -> M<A>
+    fn bind<A, B>(self: M<A>, f: fn(A) -> M<B>) -> M<B>
+}
+
+# Option monad implementation
+impl Functor<Option> for Option<_> {
+    fn map<A, B>(self: Option<A>, f: fn(A) -> B) -> Option<B> {
+        match self {
+            Some(value) => Some(f(value)),
+            None => None
+        }
+    }
+}
+
+impl Monad<Option> for Option<_> {
+    fn pure<A>(value: A) -> Option<A> {
+        Some(value)
+    }
+    
+    fn bind<A, B>(self: Option<A>, f: fn(A) -> Option<B>) -> Option<B> {
+        match self {
+            Some(value) => f(value),
+            None => None
+        }
+    }
+}
+
+# Type-level programming with const generics
+struct FixedArray<T, const N: usize> {
+    data: [T; N]
+}
+
+impl<T, const N: usize> FixedArray<T, N> {
+    fn new(data: [T; N]) -> Self {
+        FixedArray { data }
+    }
+    
+    # Compile-time size verification
+    fn concat<const M: usize>(
+        self, 
+        other: FixedArray<T, M>
+    ) -> FixedArray<T, { N + M }> 
+    where 
+        T: Copy 
+    {
+        let mut result = [self.data[0]; N + M]  # Initialize with first element
+        
+        # Copy first array
+        for i in 0..N {
+            result[i] = self.data[i]
+        }
+        
+        # Copy second array
+        for i in 0..M {
+            result[N + i] = other.data[i]
+        }
+        
+        FixedArray { data: result }
+    }
+    
+    # Type-safe indexing
+    fn get<const I: usize>(&self) -> &T 
+    where 
+        const_assert!(I < N)
+    {
+        &self.data[I]
+    }
+}
+
+# Associated types and type families
+trait Iterator {
+    type Item
+    
+    fn next(&mut self) -> Option<Self::Item>
+}
+
+trait Collect<T> {
+    type Output
+    
+    fn collect(self) -> Self::Output
+}
+
+struct RangeIterator {
+    current: i32,
+    end: i32
+}
+
+impl Iterator for RangeIterator {
+    type Item = i32
+    
+    fn next(&mut self) -> Option<i32> {
+        if self.current < self.end {
+            let value = self.current
+            self.current += 1
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+impl Collect<i32> for RangeIterator {
+    type Output = Vec<i32>
+    
+    fn collect(mut self) -> Vec<i32> {
+        let mut result = Vec::new()
+        while let Some(item) = self.next() {
+            result.push(item)
+        }
+        result
+    }
+}
+
+# Existential types for type erasure
+trait Drawable {
+    fn draw(&self)
+}
+
+struct Circle {
+    radius: f32
+}
+
+struct Rectangle {
+    width: f32,
+    height: f32
+}
+
+impl Drawable for Circle {
+    fn draw(&self) {
+        println!("Drawing circle with radius {}", self.radius)
+    }
+}
+
+impl Drawable for Rectangle {
+    fn draw(&self) {
+        println!("Drawing rectangle {}x{}", self.width, self.height)
+    }
+}
+
+# Type-erased container
+struct DrawableBox {
+    drawable: Box<dyn Drawable>
+}
+
+impl DrawableBox {
+    fn new<T: Drawable + 'static>(drawable: T) -> Self {
+        DrawableBox {
+            drawable: Box::new(drawable)
+        }
+    }
+    
+    fn draw(&self) {
+        self.drawable.draw()
+    }
+}
+
+# Compile-time computation with const functions
+const fn fibonacci(n: usize) -> usize {
+    match n {
+        0 => 0,
+        1 => 1,
+        _ => fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+const fn factorial(n: usize) -> usize {
+    match n {
+        0 | 1 => 1,
+        _ => n * factorial(n - 1)
+    }
+}
+
+# Type-level lists for compile-time computation
+trait TypeList {
+    const LENGTH: usize
+}
+
+struct Nil;
+struct Cons<Head, Tail: TypeList>;
+
+impl TypeList for Nil {
+    const LENGTH: usize = 0
+}
+
+impl<Head, Tail: TypeList> TypeList for Cons<Head, Tail> {
+    const LENGTH: usize = 1 + Tail::LENGTH
+}
+
+# Type aliases for complex types
+type StringMap<V> = HashMap<String, V>
+type Result<T> = std::result::Result<T, String>
+type AsyncResult<T> = Future<Output = Result<T>>
+
+# Demonstration functions
+fn dependent_types_demo() {
+    println!("=== Dependent Types Demo ===")
+    
+    # Compile-time verified matrix operations
+    let matrix_a: Matrix<f32, 3, 4> = tensor.random_uniform([3, 4])
+    let matrix_b: Matrix<f32, 4, 2> = tensor.random_uniform([4, 2])
+    
+    # This compiles because dimensions are compatible (3x4) * (4x2) = (3x2)
+    let result: Matrix<f32, 3, 2> = matrix_a @ matrix_b
+    
+    println!("Matrix multiplication result shape: {:?}", result.shape())
+    
+    # This would cause a compile error:
+    # let invalid = matrix_a @ matrix_a  # 3x4 * 3x4 is invalid
+    
+    # Type-safe vector operations
+    let vec_a: Vector<f32, 5> = tensor.ones([5])
+    let vec_b: Vector<f32, 5> = tensor.zeros([5])
+    let dot_product = tensor.dot(vec_a, vec_b)  # Only works for same-size vectors
+    
+    println!("Dot product: {}", dot_product)
+}
+
+fn linear_types_demo() -> Result<(), String> {
+    println!("=== Linear Types Demo ===")
+    
+    # Open a file (consumes the path string)
+    let file = FileHandle::open("example.txt".to_string())?
+    
+    # Read from file (must use the returned handle)
+    let (file, content) = file.read()
+    println!("Read: {}", content)
+    
+    # Write to file
+    let file = file.write("Hello, World!".to_string())
+    
+    # Must explicitly close the file
+    file.close()
+    
+    # file is no longer accessible here - compile error if we try to use it
+    
+    Ok(())
+}
+
+fn gradual_typing_demo() {
+    println!("=== Gradual Typing Demo ===")
+    
+    let example = GradualExample::new(42, "hello".into_dyn())
+    
+    # Process different types dynamically
+    let result1 = example.process(10.into_dyn())
+    let result2 = example.process("world".into_dyn())
+    let result3 = example.process(vec![1, 2, 3].into_dyn())
+    
+    println!("Result 1: {:?}", result1)
+    println!("Result 2: {:?}", result2)
+    println!("Result 3: {:?}", result3)
+}
+
+fn phantom_types_demo() {
+    println!("=== Phantom Types Demo ===")
+    
+    # State machine with compile-time state tracking
+    let machine = StateMachine::new("initial data".to_string())
+    
+    # Can only start from initialized state
+    let mut running_machine = machine.start()
+    
+    # Can only process when running
+    running_machine.process(" + processed".to_string())
+    
+    # Can only stop when running
+    let stopped_machine = running_machine.stop()
+    
+    # Can get result when stopped
+    let result = stopped_machine.get_result()
+    println!("Final result: {}", result)
+}
+
+fn higher_kinded_types_demo() {
+    println!("=== Higher-Kinded Types Demo ===")
+    
+    # Option monad usage
+    let value = Some(42)
+    let doubled = value.map(|x| x * 2)
+    let result = doubled.bind(|x| if x > 50 { Some(x) } else { None })
+    
+    println!("Monadic computation result: {:?}", result)
+    
+    # Chaining operations
+    let chained = Option::pure(10)
+        .bind(|x| Some(x + 5))
+        .bind(|x| Some(x * 2))
+        .map(|x| x.to_string())
+    
+    println!("Chained result: {:?}", chained)
+}
+
+fn const_generics_demo() {
+    println!("=== Const Generics Demo ===")
+    
+    let arr1 = FixedArray::new([1, 2, 3])
+    let arr2 = FixedArray::new([4, 5])
+    
+    # Compile-time verified concatenation
+    let concatenated = arr1.concat(arr2)
+    println!("Concatenated array length: {}", concatenated.data.len())
+    
+    # Type-safe indexing (index must be < array size)
+    let first_element = concatenated.get::<0>()
+    let third_element = concatenated.get::<2>()
+    
+    println!("First: {}, Third: {}", first_element, third_element)
+    
+    # This would cause a compile error:
+    # let invalid = concatenated.get::<10>()  # Index out of bounds
+}
+
+fn compile_time_computation_demo() {
+    println!("=== Compile-Time Computation Demo ===")
+    
+    # These are computed at compile time
+    const FIB_10: usize = fibonacci(10)
+    const FACT_5: usize = factorial(5)
+    
+    println!("Fibonacci(10) = {} (computed at compile time)", FIB_10)
+    println!("Factorial(5) = {} (computed at compile time)", FACT_5)
+    
+    # Type-level list length computation
+    type MyList = Cons<i32, Cons<String, Cons<f64, Nil>>>
+    const LIST_LENGTH: usize = MyList::LENGTH
+    
+    println!("Type-level list length: {}", LIST_LENGTH)
+}
+
+fn existential_types_demo() {
+    println!("=== Existential Types Demo ===")
+    
+    # Create type-erased drawables
+    let circle = DrawableBox::new(Circle { radius: 5.0 })
+    let rectangle = DrawableBox::new(Rectangle { width: 10.0, height: 8.0 })
+    
+    # Store in homogeneous collection
+    let drawables = vec![circle, rectangle]
+    
+    # Draw all shapes without knowing their concrete types
+    for drawable in &drawables {
+        drawable.draw()
+    }
+}
+
+fn associated_types_demo() {
+    println!("=== Associated Types Demo ===")
+    
+    let range = RangeIterator { current: 1, end: 6 }
+    let collected: Vec<i32> = range.collect()
+    
+    println!("Collected range: {:?}", collected)
+}
+
+# Main function demonstrating all type system features
+fn main() -> Result<(), String> {
+    println!("=== STARTING Aether Advanced Type System Example ===")
+    println!("==================================")
+    
+    dependent_types_demo()
+    println!()
+    
+    linear_types_demo()?
+    println!()
+    
+    gradual_typing_demo()
+    println!()
+    
+    phantom_types_demo()
+    println!()
+    
+    higher_kinded_types_demo()
+    println!()
+    
+    const_generics_demo()
+    println!()
+    
+    compile_time_computation_demo()
+    println!()
+    
+    existential_types_demo()
+    println!()
+    
+    associated_types_demo()
+    
+    println!("\nAll type system examples completed!")
+    println!("=== FINISHED Aether Advanced Type System Example ===")
+    Ok(())
+}

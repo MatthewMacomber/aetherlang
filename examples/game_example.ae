@@ -1,0 +1,466 @@
+# Game Development Example in Aether
+# Demonstrates ECS, 3D math, graphics, and physics integration
+
+# Import game development modules
+use stdlib.ecs as ecs
+use stdlib.math3d as math
+use stdlib.graphics as gfx
+use stdlib.physics as phys
+
+# Define game components using ECS macro
+component! PlayerController {
+    speed: f32,
+    jump_force: f32,
+    grounded: bool
+}
+
+component! Health {
+    current: f32,
+    maximum: f32
+}
+
+component! Weapon {
+    damage: f32,
+    fire_rate: f32,
+    last_shot: f32
+}
+
+# Game state structure
+struct GameState {
+    world: ecs.World,
+    physics_world: phys.PhysicsWorld,
+    renderer: Box<dyn gfx.GraphicsAPI>,
+    camera: Camera,
+    input: InputState,
+    delta_time: f32
+}
+
+struct Camera {
+    position: math.Vec3,
+    rotation: math.Quat,
+    fov: f32,
+    aspect: f32,
+    near: f32,
+    far: f32
+}
+
+struct InputState {
+    move_forward: bool,
+    move_backward: bool,
+    move_left: bool,
+    move_right: bool,
+    jump: bool,
+    shoot: bool,
+    mouse_delta: math.Vec2
+}
+
+# Initialize game systems
+fn initialize_game() -> GameState {
+    let mut world = ecs.World.new()
+    let mut physics_world = phys.PhysicsWorld.new()
+    let renderer = gfx.create_graphics_context(gfx.GraphicsBackend.WebGPU).unwrap()
+    
+    # Set up physics world
+    physics_world.set_gravity(math.Vec3.new(0.0, -9.81, 0.0))
+    
+    # Create camera
+    let camera = Camera {
+        position: math.Vec3.new(0.0, 5.0, 10.0),
+        rotation: math.Quat.identity(),
+        fov: math.degrees_to_radians(75.0),
+        aspect: 16.0 / 9.0,
+        near: 0.1,
+        far: 1000.0
+    }
+    
+    # Create player entity
+    let player = world.create_entity()
+    world.add_component(player, ecs.Transform {
+        position: math.Vec3.new(0.0, 1.0, 0.0),
+        rotation: math.Quat.identity(),
+        scale: math.Vec3.ONE
+    })
+    
+    world.add_component(player, PlayerController {
+        speed: 5.0,
+        jump_force: 10.0,
+        grounded: false
+    })
+    
+    world.add_component(player, Health {
+        current: 100.0,
+        maximum: 100.0
+    })
+    
+    # Create player physics body
+    let player_shape = phys.CollisionShape.Capsule { 
+        radius: 0.5, 
+        height: 2.0 
+    }
+    let player_material = phys.PhysicsMaterial.default()
+    let player_body = physics_world.create_body(
+        player_shape,
+        player_material,
+        math.Vec3.new(0.0, 1.0, 0.0),
+        math.Quat.identity()
+    )
+    
+    # Create ground
+    let ground = world.create_entity()
+    world.add_component(ground, ecs.Transform {
+        position: math.Vec3.new(0.0, -1.0, 0.0),
+        rotation: math.Quat.identity(),
+        scale: math.Vec3.new(50.0, 1.0, 50.0)
+    })
+    
+    let ground_shape = phys.CollisionShape.Box { 
+        half_extents: math.Vec3.new(25.0, 0.5, 25.0) 
+    }
+    let ground_material = phys.PhysicsMaterial {
+        density: 0.0,  # Static body
+        restitution: 0.1,
+        static_friction: 0.8,
+        dynamic_friction: 0.6
+    }
+    let ground_body = physics_world.create_body(
+        ground_shape,
+        ground_material,
+        math.Vec3.new(0.0, -1.0, 0.0),
+        math.Quat.identity()
+    )
+    
+    # Create some obstacles
+    for i in 0..10 {
+        let obstacle = world.create_entity()
+        let pos = math.Vec3.new(
+            (i as f32 - 5.0) * 3.0,
+            2.0,
+            -5.0
+        )
+        
+        world.add_component(obstacle, ecs.Transform {
+            position: pos,
+            rotation: math.Quat.identity(),
+            scale: math.Vec3.ONE
+        })
+        
+        let obstacle_shape = phys.CollisionShape.Box { 
+            half_extents: math.Vec3.new(1.0, 1.0, 1.0) 
+        }
+        let obstacle_material = phys.PhysicsMaterial.default()
+        physics_world.create_body(
+            obstacle_shape,
+            obstacle_material,
+            pos,
+            math.Quat.identity()
+        )
+    }
+    
+    GameState {
+        world,
+        physics_world,
+        renderer,
+        camera,
+        input: InputState {
+            move_forward: false,
+            move_backward: false,
+            move_left: false,
+            move_right: false,
+            jump: false,
+            shoot: false,
+            mouse_delta: math.Vec2.ZERO
+        },
+        delta_time: 0.016
+    }
+}
+
+# Player movement system
+struct PlayerMovementSystem;
+
+impl ecs.System for PlayerMovementSystem {
+    fn run(&mut self, world: &mut ecs.World) {
+        # Query entities with PlayerController and Transform components
+        let entities = world.entities().to_vec()
+        
+        for entity in entities {
+            if let (Some(controller), Some(transform)) = (
+                world.get_component_mut::<PlayerController>(entity),
+                world.get_component_mut::<ecs.Transform>(entity)
+            ) {
+                # Handle player input and movement
+                # This would be connected to actual input system
+                let move_dir = math.Vec3.ZERO
+                
+                # Apply movement
+                transform.position = transform.position + move_dir * controller.speed * 0.016
+            }
+        }
+    }
+}
+
+# Camera follow system
+fn update_camera(game_state: &mut GameState) {
+    # Find player entity and follow it
+    let entities = game_state.world.entities().to_vec()
+    
+    for entity in entities {
+        if let Some(transform) = game_state.world.get_component::<ecs.Transform>(entity) {
+            if game_state.world.get_component::<PlayerController>(entity).is_some() {
+                # Smooth camera follow
+                let target_pos = transform.position + math.Vec3.new(0.0, 5.0, 10.0)
+                game_state.camera.position = game_state.camera.position.lerp(target_pos, 0.1)
+                
+                # Look at player
+                let look_dir = (transform.position - game_state.camera.position).normalize()
+                game_state.camera.rotation = math.Quat.from_axis_angle(math.Vec3.Y, look_dir.x.atan2(look_dir.z))
+            }
+        }
+    }
+}
+
+# Rendering system
+fn render_frame(game_state: &mut GameState) -> Result<(), gfx.GraphicsError> {
+    let frame = game_state.renderer.begin_frame()?
+    
+    # Create view and projection matrices
+    let view_matrix = math.Mat4.look_at(
+        game_state.camera.position,
+        game_state.camera.position + game_state.camera.rotation.rotate_vector(math.Vec3.new(0.0, 0.0, -1.0)),
+        math.Vec3.Y
+    )
+    
+    let proj_matrix = math.Mat4.perspective(
+        game_state.camera.fov,
+        game_state.camera.aspect,
+        game_state.camera.near,
+        game_state.camera.far
+    )
+    
+    # Render all entities with Transform and Mesh components
+    let entities = game_state.world.entities().to_vec()
+    
+    for entity in entities {
+        if let (Some(transform), Some(mesh)) = (
+            game_state.world.get_component::<ecs.Transform>(entity),
+            game_state.world.get_component::<ecs.Mesh>(entity)
+        ) {
+            # Create model matrix
+            let model_matrix = math.Mat4.translation(transform.position) *
+                              math.Mat4.from_quat(transform.rotation) *
+                              math.Mat4.scale(transform.scale)
+            
+            let mvp_matrix = proj_matrix * view_matrix * model_matrix
+            
+            # Render mesh (simplified)
+            # In real implementation, this would set up shaders, uniforms, etc.
+        }
+    }
+    
+    game_state.renderer.end_frame(frame)?
+    Ok(())
+}
+
+# Main game loop
+fn game_loop() {
+    let mut game_state = initialize_game()
+    let mut movement_system = PlayerMovementSystem
+    
+    loop {
+        # Update physics
+        game_state.physics_world.step(game_state.delta_time)
+        
+        # Update ECS systems
+        movement_system.run(&mut game_state.world)
+        
+        # Update camera
+        update_camera(&mut game_state)
+        
+        # Render frame
+        if let Err(e) = render_frame(&mut game_state) {
+            println!("Render error: {:?}", e)
+            break
+        }
+        
+        # Simple frame rate limiting (in real game, use proper timing)
+        # sleep(16ms)
+    }
+}
+
+# Particle system example
+struct ParticleSystem {
+    particles: Vec<Particle>,
+    max_particles: usize
+}
+
+struct Particle {
+    position: math.Vec3,
+    velocity: math.Vec3,
+    life: f32,
+    max_life: f32,
+    size: f32,
+    color: math.Vec4
+}
+
+impl ParticleSystem {
+    fn new(max_particles: usize) -> Self {
+        ParticleSystem {
+            particles: Vec::new(),
+            max_particles
+        }
+    }
+    
+    fn emit(&mut self, position: math.Vec3, velocity: math.Vec3, life: f32) {
+        if self.particles.len() < self.max_particles {
+            self.particles.push(Particle {
+                position,
+                velocity,
+                life,
+                max_life: life,
+                size: 1.0,
+                color: math.Vec4.new(1.0, 1.0, 1.0, 1.0)
+            })
+        }
+    }
+    
+    fn update(&mut self, dt: f32) {
+        # Update existing particles
+        for particle in &mut self.particles {
+            particle.position = particle.position + particle.velocity * dt
+            particle.life -= dt
+            
+            # Fade out over time
+            let alpha = particle.life / particle.max_life
+            particle.color.w = alpha
+        }
+        
+        # Remove dead particles
+        self.particles.retain(|p| p.life > 0.0)
+    }
+}
+
+# Performance benchmark functions
+fn benchmark_ecs_performance() {
+    let mut world = ecs.World.new()
+    let entity_count = 10000
+    
+    # Create many entities
+    let start_time = get_time()
+    
+    for i in 0..entity_count {
+        let entity = world.create_entity()
+        world.add_component(entity, ecs.Transform {
+            position: math.Vec3.new(i as f32, 0.0, 0.0),
+            rotation: math.Quat.identity(),
+            scale: math.Vec3.ONE
+        })
+        
+        world.add_component(entity, ecs.Velocity {
+            linear: math.Vec3.new(1.0, 0.0, 0.0),
+            angular: math.Vec3.ZERO
+        })
+    }
+    
+    let creation_time = get_time() - start_time
+    println!("Created {} entities in {}ms", entity_count, creation_time * 1000.0)
+    
+    # Benchmark system update
+    let mut movement_system = ecs.MovementSystem
+    let start_time = get_time()
+    
+    for _ in 0..100 {
+        movement_system.run(&mut world)
+    }
+    
+    let update_time = get_time() - start_time
+    println!("Updated {} entities 100 times in {}ms", entity_count, update_time * 1000.0)
+}
+
+fn benchmark_physics_performance() {
+    let mut world = phys.PhysicsWorld.new()
+    let body_count = 1000
+    
+    # Create many physics bodies
+    let start_time = get_time()
+    
+    for i in 0..body_count {
+        let shape = phys.CollisionShape.Sphere { radius: 0.5 }
+        let material = phys.PhysicsMaterial.default()
+        let position = math.Vec3.new(
+            (i % 10) as f32,
+            (i / 10) as f32,
+            0.0
+        )
+        
+        world.create_body(shape, material, position, math.Quat.identity())
+    }
+    
+    let creation_time = get_time() - start_time
+    println!("Created {} physics bodies in {}ms", body_count, creation_time * 1000.0)
+    
+    # Benchmark physics step
+    let start_time = get_time()
+    
+    for _ in 0..100 {
+        world.step(1.0 / 60.0)
+    }
+    
+    let step_time = get_time() - start_time
+    println!("Stepped physics {} times in {}ms", 100, step_time * 1000.0)
+}
+
+fn benchmark_math_performance() {
+    let iterations = 1000000
+    
+    # Vector operations
+    let start_time = get_time()
+    let mut result = math.Vec3.ZERO
+    
+    for i in 0..iterations {
+        let v1 = math.Vec3.new(i as f32, i as f32, i as f32)
+        let v2 = math.Vec3.new((i + 1) as f32, (i + 1) as f32, (i + 1) as f32)
+        result = result + v1.cross(v2)
+    }
+    
+    let vector_time = get_time() - start_time
+    println!("Performed {} vector operations in {}ms", iterations, vector_time * 1000.0)
+    
+    # Matrix operations
+    let start_time = get_time()
+    let mut matrix = math.Mat4.identity()
+    
+    for i in 0..iterations / 1000 {
+        let translation = math.Mat4.translation(math.Vec3.new(i as f32, 0.0, 0.0))
+        let rotation = math.Mat4.from_quat(math.Quat.from_axis_angle(math.Vec3.Y, i as f32))
+        matrix = matrix * translation * rotation
+    }
+    
+    let matrix_time = get_time() - start_time
+    println!("Performed {} matrix operations in {}ms", iterations / 1000, matrix_time * 1000.0)
+}
+
+# Utility function to get current time (would be implemented in runtime)
+fn get_time() -> f32 {
+    # This would return actual time in seconds
+    0.0
+}
+
+# Entry point
+fn main() {
+    println!("=== STARTING Aether Game Development Example ===")
+    
+    # Run benchmarks
+    println!("Running ECS performance benchmark...")
+    benchmark_ecs_performance()
+    
+    println!("Running physics performance benchmark...")
+    benchmark_physics_performance()
+    
+    println!("Running math performance benchmark...")
+    benchmark_math_performance()
+    
+    # Start game loop
+    println!("Starting game loop...")
+    game_loop()
+    
+    println!("=== FINISHED Aether Game Development Example ===")
+}

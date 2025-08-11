@@ -1,0 +1,21 @@
+# Loop Constructs Test
+# Tests various loop types in Aether
+
+fn main() -> i32 {
+    println!("=== STARTING Loop Constructs Test ===")
+    
+    println!("For loop test:")
+    for i in 0..5 {
+        println!("  i = {}", i)
+    }
+    
+    println!("While loop test:")
+    let mut count = 0
+    while count < 3 {
+        println!("  count = {}", count)
+        count += 1
+    }
+    
+    println!("=== FINISHED Loop Constructs Test ===")
+    0
+}

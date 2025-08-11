@@ -1,0 +1,638 @@
+# Multi-Target Compilation Example
+# Demonstrates compilation to different targets: native, WebAssembly, GPU kernels
+
+use stdlib.tensor as tensor
+use stdlib.math as math
+
+# Cross-platform image processing functions
+struct ImageProcessor {
+    width: usize,
+    height: usize,
+    channels: usize
+}
+
+impl ImageProcessor {
+    fn new(width: usize, height: usize, channels: usize) -> Self {
+        ImageProcessor { width, height, channels }
+    }
+    
+    # Native CPU implementation
+    @target(native)
+    fn blur_cpu(&self, image: &tensor.Tensor<u8, [H, W, C]>, kernel_size: usize) -> tensor.Tensor<u8, [H, W, C]> {
+        let kernel = self.create_gaussian_kernel(kernel_size)
+        self.convolve_cpu(image, &kernel)
+    }
+    
+    # WebAssembly implementation for browser
+    @target(wasm32)
+    fn blur_wasm(&self, image: &tensor.Tensor<u8, [H, W, C]>, kernel_size: usize) -> tensor.Tensor<u8, [H, W, C]> {
+        # Optimized for WebAssembly with SIMD when available
+        @if(target_feature = "simd128") {
+            self.blur_simd(image, kernel_size)
+        } @else {
+            self.blur_scalar(image, kernel_size)
+        }
+    }
+    
+    # GPU kernel implementation
+    @target(gpu)
+    @kernel
+    fn blur_gpu(
+        image: &tensor.Tensor<u8, [H, W, C]>,
+        output: &mut tensor.Tensor<u8, [H, W, C]>,
+        kernel: &tensor.Tensor<f32, [K, K]>,
+        kernel_size: usize
+    ) {
+        let idx = gpu.thread_idx()
+        let idy = gpu.block_idx()
+        
+        if idx < image.shape()[1] && idy < image.shape()[0] {
+            let half_kernel = kernel_size / 2
+            
+            for c in 0..image.shape()[2] {
+                let mut sum = 0.0f32
+                let mut weight_sum = 0.0f32
+                
+                for ky in 0..kernel_size {
+                    for kx in 0..kernel_size {
+                        let py = idy as i32 + ky as i32 - half_kernel as i32
+                        let px = idx as i32 + kx as i32 - half_kernel as i32
+                        
+                        if py >= 0 && py < image.shape()[0] as i32 && 
+                           px >= 0 && px < image.shape()[1] as i32 {
+                            let pixel_value = image[[py as usize, px as usize, c]] as f32
+                            let kernel_weight = kernel[[ky, kx]]
+                            
+                            sum += pixel_value * kernel_weight
+                            weight_sum += kernel_weight
+                        }
+                    }
+                }
+                
+                output[[idy, idx, c]] = (sum / weight_sum).clamp(0.0, 255.0) as u8
+            }
+        }
+    }
+    
+    # Unified interface that dispatches to appropriate implementation
+    fn blur(&self, image: &tensor.Tensor<u8, [H, W, C]>, kernel_size: usize) -> tensor.Tensor<u8, [H, W, C]> {
+        @if(target == "native") {
+            self.blur_cpu(image, kernel_size)
+        } @else if(target == "wasm32") {
+            self.blur_wasm(image, kernel_size)
+        } @else if(target == "gpu") {
+            let mut output = tensor.zeros_like(image)
+            let kernel = self.create_gaussian_kernel(kernel_size)
+            
+            # Launch GPU kernel
+            let grid_dim = (image.shape()[0], image.shape()[1])
+            let block_dim = (16, 16)
+            
+            gpu.launch_kernel(
+                Self::blur_gpu,
+                grid_dim,
+                block_dim,
+                (image, &mut output, &kernel, kernel_size)
+            )
+            
+            output
+        } @else {
+            compile_error!("Unsupported target")
+        }
+    }
+    
+    fn create_gaussian_kernel(&self, size: usize) -> tensor.Tensor<f32, [K, K]> {
+        let sigma = size as f32 / 6.0
+        let half_size = size / 2
+        let mut kernel = tensor.zeros([size, size])
+        let mut sum = 0.0f32
+        
+        for y in 0..size {
+            for x in 0..size {
+                let dx = x as f32 - half_size as f32
+                let dy = y as f32 - half_size as f32
+                let value = (-((dx * dx + dy * dy) / (2.0 * sigma * sigma))).exp()
+                kernel[[y, x]] = value
+                sum += value
+            }
+        }
+        
+        # Normalize kernel
+        kernel / sum
+    }
+    
+    fn convolve_cpu(&self, image: &tensor.Tensor<u8, [H, W, C]>, kernel: &tensor.Tensor<f32, [K, K]>) -> tensor.Tensor<u8, [H, W, C]> {
+        let mut output = tensor.zeros_like(image)
+        let kernel_size = kernel.shape()[0]
+        let half_kernel = kernel_size / 2
+        
+        for y in 0..image.shape()[0] {
+            for x in 0..image.shape()[1] {
+                for c in 0..image.shape()[2] {
+                    let mut sum = 0.0f32
+                    let mut weight_sum = 0.0f32
+                    
+                    for ky in 0..kernel_size {
+                        for kx in 0..kernel_size {
+                            let py = y as i32 + ky as i32 - half_kernel as i32
+                            let px = x as i32 + kx as i32 - half_kernel as i32
+                            
+                            if py >= 0 && py < image.shape()[0] as i32 && 
+                               px >= 0 && px < image.shape()[1] as i32 {
+                                let pixel_value = image[[py as usize, px as usize, c]] as f32
+                                let kernel_weight = kernel[[ky, kx]]
+                                
+                                sum += pixel_value * kernel_weight
+                                weight_sum += kernel_weight
+                            }
+                        }
+                    }
+                    
+                    output[[y, x, c]] = (sum / weight_sum).clamp(0.0, 255.0) as u8
+                }
+            }
+        }
+        
+        output
+    }
+    
+    @target(wasm32)
+    fn blur_simd(&self, image: &tensor.Tensor<u8, [H, W, C]>, kernel_size: usize) -> tensor.Tensor<u8, [H, W, C]> {
+        # WebAssembly SIMD implementation
+        use wasm_simd::*
+        
+        let kernel = self.create_gaussian_kernel(kernel_size)
+        let mut output = tensor.zeros_like(image)
+        
+        # Process 16 pixels at a time using SIMD
+        for y in 0..image.shape()[0] {
+            let mut x = 0
+            while x + 16 <= image.shape()[1] {
+                for c in 0..image.shape()[2] {
+                    # Load 16 pixels
+                    let pixels = v128_load(&image.data()[y * image.shape()[1] * image.shape()[2] + x * image.shape()[2] + c..])
+                    
+                    # Apply convolution using SIMD operations
+                    let result = self.convolve_simd_16(pixels, &kernel, y, x, c, image)
+                    
+                    # Store result
+                    v128_store(&mut output.data_mut()[y * image.shape()[1] * image.shape()[2] + x * image.shape()[2] + c..], result)
+                }
+                x += 16
+            }
+            
+            # Handle remaining pixels
+            while x < image.shape()[1] {
+                for c in 0..image.shape()[2] {
+                    output[[y, x, c]] = self.convolve_single_pixel(image, &kernel, y, x, c)
+                }
+                x += 1
+            }
+        }
+        
+        output
+    }
+    
+    fn blur_scalar(&self, image: &tensor.Tensor<u8, [H, W, C]>, kernel_size: usize) -> tensor.Tensor<u8, [H, W, C]> {
+        # Fallback scalar implementation for WebAssembly
+        let kernel = self.create_gaussian_kernel(kernel_size)
+        self.convolve_cpu(image, &kernel)
+    }
+}
+
+# Neural network that can run on different targets
+struct MultiTargetNeuralNetwork {
+    weights1: tensor.Tensor<f32, [784, 128]>,
+    bias1: tensor.Tensor<f32, [128]>,
+    weights2: tensor.Tensor<f32, [128, 10]>,
+    bias2: tensor.Tensor<f32, [10]>
+}
+
+impl MultiTargetNeuralNetwork {
+    fn new() -> Self {
+        MultiTargetNeuralNetwork {
+            weights1: tensor.random_normal([784, 128]) * 0.1,
+            bias1: tensor.zeros([128]),
+            weights2: tensor.random_normal([128, 10]) * 0.1,
+            bias2: tensor.zeros([10])
+        }
+    }
+    
+    # CPU inference
+    @target(native)
+    fn forward_cpu(&self, input: &tensor.Tensor<f32, [N, 784]>) -> tensor.Tensor<f32, [N, 10]> {
+        let hidden = tensor.relu(input @ &self.weights1 + &self.bias1)
+        hidden @ &self.weights2 + &self.bias2
+    }
+    
+    # WebAssembly inference with optimizations
+    @target(wasm32)
+    fn forward_wasm(&self, input: &tensor.Tensor<f32, [N, 784]>) -> tensor.Tensor<f32, [N, 10]> {
+        # Use WebAssembly-specific optimizations
+        @if(target_feature = "simd128") {
+            self.forward_wasm_simd(input)
+        } @else {
+            self.forward_wasm_scalar(input)
+        }
+    }
+    
+    # GPU inference kernel
+    @target(gpu)
+    @kernel
+    fn forward_gpu_kernel(
+        input: &tensor.Tensor<f32, [N, 784]>,
+        weights1: &tensor.Tensor<f32, [784, 128]>,
+        bias1: &tensor.Tensor<f32, [128]>,
+        weights2: &tensor.Tensor<f32, [128, 10]>,
+        bias2: &tensor.Tensor<f32, [10]>,
+        output: &mut tensor.Tensor<f32, [N, 10]>
+    ) {
+        let batch_idx = gpu.block_idx().x
+        let output_idx = gpu.thread_idx().x
+        
+        if batch_idx < input.shape()[0] && output_idx < 10 {
+            # Compute hidden layer
+            let mut hidden = [0.0f32; 128]
+            
+            for h in 0..128 {
+                let mut sum = bias1[h]
+                for i in 0..784 {
+                    sum += input[[batch_idx, i]] * weights1[[i, h]]
+                }
+                hidden[h] = math.max(0.0, sum)  # ReLU
+            }
+            
+            # Compute output layer
+            let mut out_sum = bias2[output_idx]
+            for h in 0..128 {
+                out_sum += hidden[h] * weights2[[h, output_idx]]
+            }
+            
+            output[[batch_idx, output_idx]] = out_sum
+        }
+    }
+    
+    # Unified inference interface
+    fn forward(&self, input: &tensor.Tensor<f32, [N, 784]>) -> tensor.Tensor<f32, [N, 10]> {
+        @if(target == "native") {
+            self.forward_cpu(input)
+        } @else if(target == "wasm32") {
+            self.forward_wasm(input)
+        } @else if(target == "gpu") {
+            let mut output = tensor.zeros([input.shape()[0], 10])
+            
+            let grid_dim = (input.shape()[0], 1, 1)
+            let block_dim = (10, 1, 1)
+            
+            gpu.launch_kernel(
+                Self::forward_gpu_kernel,
+                grid_dim,
+                block_dim,
+                (input, &self.weights1, &self.bias1, &self.weights2, &self.bias2, &mut output)
+            )
+            
+            output
+        } @else {
+            compile_error!("Unsupported target")
+        }
+    }
+}
+
+# Web-specific functionality
+@target(wasm32)
+mod web_interface {
+    use wasm_bindgen::prelude::*
+    
+    # JavaScript bindings for web deployment
+    @wasm_bindgen
+    pub struct WebImageProcessor {
+        processor: ImageProcessor
+    }
+    
+    @wasm_bindgen
+    impl WebImageProcessor {
+        @wasm_bindgen(constructor)
+        pub fn new(width: usize, height: usize, channels: usize) -> WebImageProcessor {
+            WebImageProcessor {
+                processor: ImageProcessor::new(width, height, channels)
+            }
+        }
+        
+        @wasm_bindgen
+        pub fn blur_image(&self, image_data: &[u8], kernel_size: usize) -> Vec<u8> {
+            let image_tensor = tensor.from_slice(image_data, [self.processor.height, self.processor.width, self.processor.channels])
+            let blurred = self.processor.blur(&image_tensor, kernel_size)
+            blurred.to_vec()
+        }
+        
+        @wasm_bindgen
+        pub fn process_canvas(&self, canvas_id: &str, kernel_size: usize) {
+            # Get canvas context and image data
+            let canvas = web_sys::window()
+                .unwrap()
+                .document()
+                .unwrap()
+                .get_element_by_id(canvas_id)
+                .unwrap()
+                .dyn_into::<web_sys::HtmlCanvasElement>()
+                .unwrap()
+            
+            let context = canvas
+                .get_context("2d")
+                .unwrap()
+                .unwrap()
+                .dyn_into::<web_sys::CanvasRenderingContext2d>()
+                .unwrap()
+            
+            let image_data = context
+                .get_image_data(0.0, 0.0, canvas.width() as f64, canvas.height() as f64)
+                .unwrap()
+            
+            # Process image
+            let processed = self.blur_image(&image_data.data(), kernel_size)
+            
+            # Put processed data back
+            let new_image_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+                wasm_bindgen::Clamped(&processed),
+                canvas.width(),
+                canvas.height()
+            ).unwrap()
+            
+            context.put_image_data(&new_image_data, 0.0, 0.0).unwrap()
+        }
+    }
+    
+    # Neural network web interface
+    @wasm_bindgen
+    pub struct WebNeuralNetwork {
+        network: MultiTargetNeuralNetwork
+    }
+    
+    @wasm_bindgen
+    impl WebNeuralNetwork {
+        @wasm_bindgen(constructor)
+        pub fn new() -> WebNeuralNetwork {
+            WebNeuralNetwork {
+                network: MultiTargetNeuralNetwork::new()
+            }
+        }
+        
+        @wasm_bindgen
+        pub fn predict(&self, input: &[f32]) -> Vec<f32> {
+            let input_tensor = tensor.from_slice(input, [1, 784])
+            let output = self.network.forward(&input_tensor)
+            output.to_vec()
+        }
+        
+        @wasm_bindgen
+        pub fn predict_batch(&self, input: &[f32], batch_size: usize) -> Vec<f32> {
+            let input_tensor = tensor.from_slice(input, [batch_size, 784])
+            let output = self.network.forward(&input_tensor)
+            output.to_vec()
+        }
+    }
+}
+
+# GPU-specific functionality
+@target(gpu)
+mod gpu_kernels {
+    # Matrix multiplication kernel
+    @kernel
+    pub fn matmul_kernel<const M: usize, const N: usize, const K: usize>(
+        a: &tensor.Tensor<f32, [M, K]>,
+        b: &tensor.Tensor<f32, [K, N]>,
+        c: &mut tensor.Tensor<f32, [M, N]>
+    ) {
+        let row = gpu.block_idx().y * gpu.block_dim().y + gpu.thread_idx().y
+        let col = gpu.block_idx().x * gpu.block_dim().x + gpu.thread_idx().x
+        
+        if row < M && col < N {
+            let mut sum = 0.0f32
+            for k in 0..K {
+                sum += a[[row, k]] * b[[k, col]]
+            }
+            c[[row, col]] = sum
+        }
+    }
+    
+    # Optimized convolution kernel with shared memory
+    @kernel
+    pub fn conv2d_kernel<const H: usize, const W: usize, const C: usize, const K: usize>(
+        input: &tensor.Tensor<f32, [H, W, C]>,
+        kernel: &tensor.Tensor<f32, [K, K, C]>,
+        output: &mut tensor.Tensor<f32, [H, W, C]>
+    ) {
+        # Shared memory for tile-based computation
+        @shared static mut tile: [[f32; 32]; 32] = [[0.0; 32]; 32]
+        
+        let tx = gpu.thread_idx().x
+        let ty = gpu.thread_idx().y
+        let bx = gpu.block_idx().x
+        let by = gpu.block_idx().y
+        
+        let row = by * gpu.block_dim().y + ty
+        let col = bx * gpu.block_dim().x + tx
+        
+        if row < H && col < W {
+            for c in 0..C {
+                let mut sum = 0.0f32
+                
+                # Load data into shared memory
+                if tx < K && ty < K {
+                    let input_row = row + ty - K / 2
+                    let input_col = col + tx - K / 2
+                    
+                    if input_row >= 0 && input_row < H as i32 && 
+                       input_col >= 0 && input_col < W as i32 {
+                        tile[ty][tx] = input[[input_row as usize, input_col as usize, c]]
+                    } else {
+                        tile[ty][tx] = 0.0
+                    }
+                }
+                
+                gpu.sync_threads()
+                
+                # Compute convolution
+                for ky in 0..K {
+                    for kx in 0..K {
+                        sum += tile[ky][kx] * kernel[[ky, kx, c]]
+                    }
+                }
+                
+                output[[row, col, c]] = sum
+                
+                gpu.sync_threads()
+            }
+        }
+    }
+}
+
+# Performance benchmarking across targets
+fn benchmark_image_processing() {
+    println!("=== Image Processing Benchmark ===")
+    
+    let width = 1920
+    let height = 1080
+    let channels = 3
+    let kernel_size = 5
+    
+    let processor = ImageProcessor::new(width, height, channels)
+    let test_image = tensor.random_uniform([height, width, channels]).cast::<u8>()
+    
+    # Benchmark different targets
+    let iterations = 10
+    
+    @if(target == "native") {
+        let start_time = get_time()
+        for _ in 0..iterations {
+            let _result = processor.blur_cpu(&test_image, kernel_size)
+        }
+        let cpu_time = (get_time() - start_time) / iterations as f32
+        println!("CPU blur: {:.2}ms per iteration", cpu_time * 1000.0)
+    }
+    
+    @if(target == "gpu") {
+        let start_time = get_time()
+        for _ in 0..iterations {
+            let _result = processor.blur(&test_image, kernel_size)
+        }
+        let gpu_time = (get_time() - start_time) / iterations as f32
+        println!("GPU blur: {:.2}ms per iteration", gpu_time * 1000.0)
+    }
+    
+    @if(target == "wasm32") {
+        let start_time = get_time()
+        for _ in 0..iterations {
+            let _result = processor.blur_wasm(&test_image, kernel_size)
+        }
+        let wasm_time = (get_time() - start_time) / iterations as f32
+        println!("WASM blur: {:.2}ms per iteration", wasm_time * 1000.0)
+    }
+}
+
+fn benchmark_neural_network() {
+    println!("=== Neural Network Benchmark ===")
+    
+    let network = MultiTargetNeuralNetwork::new()
+    let batch_size = 32
+    let test_input = tensor.random_uniform([batch_size, 784])
+    
+    let iterations = 100
+    
+    let start_time = get_time()
+    for _ in 0..iterations {
+        let _output = network.forward(&test_input)
+    }
+    let inference_time = (get_time() - start_time) / iterations as f32
+    
+    @if(target == "native") {
+        println!("CPU inference: {:.2}ms per batch", inference_time * 1000.0)
+    } @else if(target == "gpu") {
+        println!("GPU inference: {:.2}ms per batch", inference_time * 1000.0)
+    } @else if(target == "wasm32") {
+        println!("WASM inference: {:.2}ms per batch", inference_time * 1000.0)
+    }
+    
+    let throughput = (batch_size as f32) / inference_time
+    println!("Throughput: {:.0} samples/second", throughput)
+}
+
+# Target-specific optimizations
+@target(native)
+fn native_optimizations() {
+    println!("=== Native Optimizations ===")
+    
+    # Use all available CPU cores
+    let num_threads = std.thread.available_parallelism().unwrap().get()
+    println!("Using {} CPU threads", num_threads)
+    
+    # SIMD optimizations
+    @if(target_feature = "avx2") {
+        println!("AVX2 SIMD instructions available")
+    } @else if(target_feature = "sse4.1") {
+        println!("SSE4.1 SIMD instructions available")
+    } @else {
+        println!("No advanced SIMD instructions available")
+    }
+}
+
+@target(wasm32)
+fn wasm_optimizations() {
+    println!("=== WebAssembly Optimizations ===")
+    
+    # Check for WebAssembly features
+    @if(target_feature = "simd128") {
+        println!("WebAssembly SIMD enabled")
+    } @else {
+        println!("WebAssembly SIMD not available")
+    }
+    
+    @if(target_feature = "bulk-memory") {
+        println!("Bulk memory operations enabled")
+    }
+    
+    @if(target_feature = "threads") {
+        println!("WebAssembly threads enabled")
+    }
+}
+
+@target(gpu)
+fn gpu_optimizations() {
+    println!("=== GPU Optimizations ===")
+    
+    let device_props = gpu.get_device_properties()
+    println!("GPU: {}", device_props.name)
+    println!("Compute capability: {}.{}", device_props.major, device_props.minor)
+    println!("Multiprocessors: {}", device_props.multiprocessor_count)
+    println!("Max threads per block: {}", device_props.max_threads_per_block)
+    println!("Shared memory per block: {} KB", device_props.shared_memory_per_block / 1024)
+    println!("Global memory: {} GB", device_props.total_global_memory / (1024 * 1024 * 1024))
+}
+
+# Utility function
+fn get_time() -> f32 {
+    # This would return actual time in seconds
+    0.0
+}
+
+# Main function with target-specific behavior
+fn main() -> Result<(), String> {
+    println!("=== STARTING Aether Multi-Target Compilation Example ===")
+    println!("======================================")
+    
+    @if(target == "native") {
+        println!("Running on native target")
+        native_optimizations()
+    } @else if(target == "wasm32") {
+        println!("Running on WebAssembly target")
+        wasm_optimizations()
+    } @else if(target == "gpu") {
+        println!("Running on GPU target")
+        gpu_optimizations()
+    }
+    
+    println!()
+    
+    benchmark_image_processing()
+    println!()
+    
+    benchmark_neural_network()
+    
+    @if(target == "wasm32") {
+        println!("\nWebAssembly-specific features:")
+        println!("- Image processing available via WebImageProcessor")
+        println!("- Neural network inference via WebNeuralNetwork")
+        println!("- Canvas integration for real-time processing")
+    }
+    
+    @if(target == "gpu") {
+        println!("\nGPU-specific features:")
+        println!("- Optimized CUDA/OpenCL kernels")
+        println!("- Shared memory utilization")
+        println!("- Coalesced memory access patterns")
+    }
+    
+    println!("\nMulti-target compilation completed!")
+    println!("=== FINISHED Aether Multi-Target Compilation Example ===")
+    Ok(())
+}

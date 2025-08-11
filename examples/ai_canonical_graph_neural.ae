@@ -1,0 +1,226 @@
+# AI-Focused Canonical Syntax: Graph Neural Networks
+# Demonstrates canonical form for graph structures and GNN operations
+# Uses extended S-expression syntax with graph labels for cycles and shared nodes
+
+(module graph_neural_networks
+  
+  # Graph structure definition with labeled nodes for shared references
+  (graph social_network
+    (nodes
+      (node :alice (features [0.1 0.2 0.3]))
+      (node :bob (features [0.4 0.5 0.6]))
+      (node :charlie (features [0.7 0.8 0.9]))
+      (node :diana (features [0.2 0.3 0.4])))
+    (edges
+      (edge :alice :bob (weight 0.8))
+      (edge :bob :charlie (weight 0.6))
+      (edge :charlie :diana (weight 0.9))
+      (edge :diana :alice (weight 0.7))  # Creates cycle
+      (edge :alice :charlie (weight 0.5))))  # Shared connection
+  
+  # Graph convolution layer
+  (fn graph_conv ((node_features Tensor<f32 [N D]>) 
+                  (adjacency Tensor<f32 [N N]>) 
+                  (weight Tensor<f32 [D H]>))
+    # Message passing: aggregate neighbor features
+    (let messages (matmul adjacency node_features))
+    # Apply linear transformation
+    (let output (matmul messages weight))
+    # Apply activation
+    (relu output))
+  
+  # Graph attention network layer
+  (fn graph_attention ((node_features Tensor<f32 [N D]>) 
+                       (adjacency Tensor<f32 [N N]>)
+                       (num_heads i32))
+    (let head_dim (/ D num_heads))
+    (let attention_scores (zeros [N N num_heads]))
+    
+    # Compute attention for each head
+    (for head (range num_heads)
+      (let w_q (param (concat "query_" head)))
+      (let w_k (param (concat "key_" head)))
+      (let w_v (param (concat "value_" head)))
+      
+      (let queries (matmul node_features w_q))
+      (let keys (matmul node_features w_k))
+      (let values (matmul node_features w_v))
+      
+      # Compute attention scores
+      (for i (range N)
+        (for j (range N)
+          (when (> (index adjacency i j) 0)  # Only connected nodes
+            (let score (/ (dot (index queries i) (index keys j)) 
+                         (sqrt (cast f32 head_dim))))
+            (set attention_scores i j head score)))))
+    
+    # Apply softmax and aggregate
+    (let normalized_attention (softmax attention_scores -1))
+    (let aggregated (einsum "ijh,jd->ihd" normalized_attention node_features))
+    (reshape aggregated [N (* num_heads head_dim)]))
+  
+  # Graph transformer block
+  (fn graph_transformer_block ((node_features Tensor<f32 [N D]>) 
+                               (adjacency Tensor<f32 [N N]>))
+    # Self-attention on graph structure
+    (let attn_output (graph_attention node_features adjacency 8))
+    (let residual1 (+ node_features attn_output))
+    (let norm1 (layer_norm residual1))
+    
+    # Feed-forward network
+    (let ff_output (feed_forward norm1))
+    (let residual2 (+ norm1 ff_output))
+    (layer_norm residual2))
+  
+  # Message passing neural network
+  (fn mpnn ((node_features Tensor<f32 [N D]>) 
+            (edge_features Tensor<f32 [E F]>) 
+            (edge_index Tensor<i32 [2 E]>)
+            (num_steps i32))
+    (let messages (zeros [N D]))
+    
+    # Message passing steps
+    (for step (range num_steps)
+      # Reset messages
+      (fill messages 0.0)
+      
+      # Compute messages for each edge
+      (for e (range E)
+        (let src (index edge_index 0 e))
+        (let dst (index edge_index 1 e))
+        (let edge_feat (index edge_features e))
+        
+        # Message function
+        (let message (message_fn (index node_features src) 
+                                (index node_features dst) 
+                                edge_feat))
+        
+        # Aggregate messages at destination
+        (set messages dst (+ (index messages dst) message)))
+      
+      # Update node features
+      (for n (range N)
+        (let updated (update_fn (index node_features n) (index messages n)))
+        (set node_features n updated)))
+    
+    node_features)
+  
+  # Graph pooling operations
+  (fn graph_pool ((node_features Tensor<f32 [N D]>) (pool_type symbol))
+    (cond
+      ((eq pool_type 'mean) (mean node_features 0))
+      ((eq pool_type 'max) (max node_features 0))
+      ((eq pool_type 'sum) (sum node_features 0))
+      ((eq pool_type 'attention) (attention_pool node_features))))
+  
+  # Attention-based pooling
+  (fn attention_pool ((node_features Tensor<f32 [N D]>))
+    (let attention_weights (softmax (linear node_features 1) 0))
+    (sum (* attention_weights node_features) 0))
+  
+  # Graph classification network
+  (fn graph_classifier ((graphs list) (num_classes i32))
+    (let predictions (list))
+    
+    (for graph graphs
+      (let node_feat (get graph node_features))
+      (let adjacency (get graph adjacency))
+      
+      # Apply graph transformer layers
+      (let h1 (graph_transformer_block node_feat adjacency))
+      (let h2 (graph_transformer_block h1 adjacency))
+      (let h3 (graph_transformer_block h2 adjacency))
+      
+      # Global pooling
+      (let graph_embedding (graph_pool h3 'attention))
+      
+      # Classification head
+      (let logits (linear graph_embedding num_classes))
+      (append predictions logits))
+    
+    (stack predictions 0))
+  
+  # Graph generation with variational approach
+  (fn graph_vae ((adjacency Tensor<f32 [N N]>) (node_features Tensor<f32 [N D]>))
+    # Encoder: graph -> latent
+    (let h (graph_transformer_block node_features adjacency))
+    (let graph_repr (graph_pool h 'mean))
+    (let mu (linear graph_repr latent_dim))
+    (let log_var (linear graph_repr latent_dim))
+    
+    # Reparameterization trick
+    (let std (exp (* 0.5 log_var)))
+    (let eps (randn latent_dim))
+    (let z (+ mu (* std eps)))
+    
+    # Decoder: latent -> graph
+    (let decoded_nodes (decode_nodes z N D))
+    (let decoded_edges (decode_edges z N))
+    
+    (return (dict (z z) (mu mu) (log_var log_var) 
+                  (nodes decoded_nodes) (edges decoded_edges))))
+  
+  # Example: Social network analysis
+  (fn analyze_social_network ()
+    # Load graph data
+    (let graph (load_graph "social_network.json"))
+    (let node_features (get graph node_features))
+    (let adjacency (get graph adjacency))
+    
+    # Apply GNN layers
+    (let embeddings (graph_transformer_block node_features adjacency))
+    
+    # Community detection via clustering
+    (let communities (kmeans embeddings 3))
+    
+    # Link prediction
+    (let link_probs (predict_links embeddings adjacency))
+    
+    # Influence scoring
+    (let influence_scores (compute_influence embeddings adjacency))
+    
+    (return (dict (communities communities) 
+                  (link_predictions link_probs)
+                  (influence influence_scores))))
+  
+  # Main function demonstrating graph neural network usage
+  (fn main ()
+    (print "=== STARTING AI Canonical Graph Neural Networks Example ===")
+    
+    # Create sample molecular graph
+    (print "Creating benzene molecular graph...")
+    (let molecule
+      (graph benzene
+        (nodes
+          (node :c1 (features [6 1 0]))  # Carbon, 1 hydrogen
+          (node :c2 (features [6 1 0]))
+          (node :c3 (features [6 1 0]))
+          (node :c4 (features [6 1 0]))
+          (node :c5 (features [6 1 0]))
+          (node :c6 (features [6 1 0])))
+        (edges
+          (edge :c1 :c2 (type 'aromatic))
+          (edge :c2 :c3 (type 'aromatic))
+          (edge :c3 :c4 (type 'aromatic))
+          (edge :c4 :c5 (type 'aromatic))
+          (edge :c5 :c6 (type 'aromatic))
+          (edge :c6 :c1 (type 'aromatic)))))  # Ring closure
+    
+    # Convert to tensor representation
+    (print "Converting graph to tensor representation...")
+    (let node_tensor (graph_to_tensor molecule 'nodes))
+    (let adj_matrix (graph_to_tensor molecule 'adjacency))
+    
+    # Apply graph neural network
+    (print "Applying graph transformer block...")
+    (let molecular_embedding (graph_transformer_block node_tensor adj_matrix))
+    
+    # Predict molecular properties
+    (print "Predicting molecular properties...")
+    (let properties (predict_properties molecular_embedding))
+    
+    (print "Molecular embedding shape:" (shape molecular_embedding))
+    (print "Predicted properties:" properties)
+    
+    (print "=== FINISHED AI Canonical Graph Neural Networks Example ===")
+    (return 0)))

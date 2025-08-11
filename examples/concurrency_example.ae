@@ -1,0 +1,489 @@
+# Concurrency Example
+# Demonstrates structured concurrency, actors, and parallel processing
+
+use stdlib.async as async
+use stdlib.channel as channel
+use stdlib.actor as actor
+use stdlib.parallel as parallel
+
+# Actor-based message passing system
+actor WeatherStation {
+    state: {
+        location: String,
+        temperature: f32,
+        humidity: f32,
+        last_update: u64
+    }
+    
+    # Message types
+    messages {
+        UpdateReading { temp: f32, humidity: f32 },
+        GetReading { respond_to: channel.Sender<WeatherReading> },
+        Shutdown
+    }
+    
+    # Actor initialization
+    fn new(location: String) -> Self {
+        WeatherStation {
+            state: {
+                location,
+                temperature: 0.0,
+                humidity: 0.0,
+                last_update: 0
+            }
+        }
+    }
+    
+    # Message handlers
+    async fn handle_message(&mut self, msg: Message) {
+        match msg {
+            UpdateReading { temp, humidity } => {
+                self.state.temperature = temp
+                self.state.humidity = humidity
+                self.state.last_update = get_timestamp()
+                println("Updated {} weather: {}°C, {}% humidity", 
+                        self.state.location, temp, humidity)
+            }
+            
+            GetReading { respond_to } => {
+                let reading = WeatherReading {
+                    location: self.state.location.clone(),
+                    temperature: self.state.temperature,
+                    humidity: self.state.humidity,
+                    timestamp: self.state.last_update
+                }
+                respond_to.send(reading).await
+            }
+            
+            Shutdown => {
+                println("Weather station {} shutting down", self.state.location)
+                self.stop()
+            }
+        }
+    }
+}
+
+# Data structures
+struct WeatherReading {
+    location: String,
+    temperature: f32,
+    humidity: f32,
+    timestamp: u64
+}
+
+# Async/await example with structured concurrency
+async fn weather_monitoring_system() -> Result<(), String> {
+    println("=== Weather Monitoring System ===")
+    
+    # Create weather stations
+    let station1 = WeatherStation::spawn("New York").await?
+    let station2 = WeatherStation::spawn("London").await?
+    let station3 = WeatherStation::spawn("Tokyo").await?
+    
+    # Create channels for communication
+    let (reading_sender, reading_receiver) = channel.unbounded::<WeatherReading>()
+    
+    # Spawn concurrent tasks using structured concurrency
+    async.scope(|scope| {
+        # Task 1: Simulate sensor readings
+        scope.spawn(async {
+            for i in 0..10 {
+                let temp1 = 20.0 + (i as f32) * 0.5
+                let temp2 = 15.0 + (i as f32) * 0.3
+                let temp3 = 25.0 + (i as f32) * 0.7
+                
+                station1.send(UpdateReading { 
+                    temp: temp1, 
+                    humidity: 60.0 + (i as f32) 
+                }).await
+                
+                station2.send(UpdateReading { 
+                    temp: temp2, 
+                    humidity: 70.0 + (i as f32) 
+                }).await
+                
+                station3.send(UpdateReading { 
+                    temp: temp3, 
+                    humidity: 80.0 + (i as f32) 
+                }).await
+                
+                async.sleep_ms(1000).await
+            }
+        })
+        
+        # Task 2: Collect readings periodically
+        scope.spawn(async {
+            for _ in 0..5 {
+                async.sleep_ms(2000).await
+                
+                # Request readings from all stations concurrently
+                let (s1, r1) = channel.oneshot()
+                let (s2, r2) = channel.oneshot()
+                let (s3, r3) = channel.oneshot()
+                
+                station1.send(GetReading { respond_to: s1 }).await
+                station2.send(GetReading { respond_to: s2 }).await
+                station3.send(GetReading { respond_to: s3 }).await
+                
+                # Wait for all responses
+                let readings = async.join3(r1.recv(), r2.recv(), r3.recv()).await
+                
+                match readings {
+                    (Ok(r1), Ok(r2), Ok(r3)) => {
+                        println("Collected readings:")
+                        println("  {}: {}°C", r1.location, r1.temperature)
+                        println("  {}: {}°C", r2.location, r2.temperature)
+                        println("  {}: {}°C", r3.location, r3.temperature)
+                        
+                        # Send to aggregator
+                        reading_sender.send(r1).await
+                        reading_sender.send(r2).await
+                        reading_sender.send(r3).await
+                    }
+                    _ => println("Failed to collect some readings")
+                }
+            }
+        })
+        
+        # Task 3: Data aggregation
+        scope.spawn(async {
+            let mut readings = Vec::new()
+            
+            while let Ok(reading) = reading_receiver.recv().await {
+                readings.push(reading)
+                
+                if readings.len() >= 15 {  # 3 stations × 5 collections
+                    let avg_temp = readings.iter()
+                        .map(|r| r.temperature)
+                        .sum::<f32>() / readings.len() as f32
+                    
+                    println("Average temperature across all stations: {:.1}°C", avg_temp)
+                    break
+                }
+            }
+        })
+    }).await
+    
+    # Shutdown stations
+    station1.send(Shutdown).await
+    station2.send(Shutdown).await
+    station3.send(Shutdown).await
+    
+    Ok(())
+}
+
+# Parallel processing example
+fn parallel_processing_demo() {
+    println("=== Parallel Processing Demo ===")
+    
+    # CPU-intensive computation
+    fn fibonacci(n: u64) -> u64 {
+        if n <= 1 {
+            n
+        } else {
+            fibonacci(n - 1) + fibonacci(n - 2)
+        }
+    }
+    
+    # Sequential computation
+    let start_time = get_time()
+    let sequential_results: Vec<u64> = (30..40)
+        .map(|n| fibonacci(n))
+        .collect()
+    let sequential_time = get_time() - start_time
+    
+    println("Sequential computation: {:.2}ms", sequential_time * 1000.0)
+    
+    # Parallel computation using rayon-style parallel iterators
+    let start_time = get_time()
+    let parallel_results: Vec<u64> = (30..40)
+        .into_par_iter()
+        .map(|n| fibonacci(n))
+        .collect()
+    let parallel_time = get_time() - start_time
+    
+    println("Parallel computation: {:.2}ms", parallel_time * 1000.0)
+    println("Speedup: {:.2}x", sequential_time / parallel_time)
+    
+    # Verify results are the same
+    assert_eq!(sequential_results, parallel_results)
+    println("Results verified!")
+}
+
+# Work-stealing task scheduler example
+async fn work_stealing_demo() {
+    println("=== Work-Stealing Task Scheduler Demo ===")
+    
+    # Create a work-stealing executor
+    let executor = async.WorkStealingExecutor::new(num_cpus::get())
+    
+    # Submit many small tasks
+    let tasks: Vec<_> = (0..1000)
+        .map(|i| {
+            executor.spawn(async move {
+                # Simulate some work
+                let mut sum = 0
+                for j in 0..i {
+                    sum += j * j
+                }
+                sum
+            })
+        })
+        .collect()
+    
+    # Wait for all tasks to complete
+    let results = async.join_all(tasks).await
+    let total: i32 = results.into_iter().sum()
+    
+    println("Completed 1000 tasks, total sum: {}", total)
+}
+
+# Producer-consumer pattern with channels
+async fn producer_consumer_demo() {
+    println("=== Producer-Consumer Demo ===")
+    
+    let (sender, receiver) = channel.bounded::<i32>(10)  # Bounded channel
+    
+    # Multiple producers
+    let producers = async.scope(|scope| {
+        for producer_id in 0..3 {
+            let sender = sender.clone()
+            scope.spawn(async move {
+                for i in 0..10 {
+                    let value = producer_id * 100 + i
+                    sender.send(value).await.unwrap()
+                    println("Producer {} sent: {}", producer_id, value)
+                    async.sleep_ms(100).await
+                }
+            })
+        }
+    })
+    
+    # Single consumer
+    let consumer = async.spawn(async move {
+        let mut received = Vec::new()
+        
+        while received.len() < 30 {  # 3 producers × 10 items each
+            if let Ok(value) = receiver.recv().await {
+                received.push(value)
+                println("Consumer received: {}", value)
+            }
+        }
+        
+        received.sort()
+        println("Consumer received all {} items", received.len())
+        received
+    })
+    
+    # Wait for completion
+    let (_, received_items) = async.join(producers, consumer).await
+    println("Final received items: {:?}", received_items)
+}
+
+# Distributed actor system example
+actor DistributedCounter {
+    state: {
+        count: i64,
+        node_id: String
+    }
+    
+    messages {
+        Increment { amount: i64 },
+        GetCount { respond_to: channel.Sender<i64> },
+        Sync { other_count: i64, from_node: String },
+        RequestSync { respond_to: channel.Sender<i64> }
+    }
+    
+    fn new(node_id: String) -> Self {
+        DistributedCounter {
+            state: {
+                count: 0,
+                node_id
+            }
+        }
+    }
+    
+    async fn handle_message(&mut self, msg: Message) {
+        match msg {
+            Increment { amount } => {
+                self.state.count += amount
+                println("Node {}: count = {}", self.state.node_id, self.state.count)
+            }
+            
+            GetCount { respond_to } => {
+                respond_to.send(self.state.count).await
+            }
+            
+            Sync { other_count, from_node } => {
+                # Simple consensus: take the maximum
+                if other_count > self.state.count {
+                    println("Node {}: syncing with {} ({})", 
+                           self.state.node_id, from_node, other_count)
+                    self.state.count = other_count
+                }
+            }
+            
+            RequestSync { respond_to } => {
+                respond_to.send(self.state.count).await
+            }
+        }
+    }
+}
+
+async fn distributed_system_demo() {
+    println("=== Distributed System Demo ===")
+    
+    # Create distributed counter nodes
+    let node1 = DistributedCounter::spawn("Node1".to_string()).await.unwrap()
+    let node2 = DistributedCounter::spawn("Node2".to_string()).await.unwrap()
+    let node3 = DistributedCounter::spawn("Node3".to_string()).await.unwrap()
+    
+    # Simulate distributed operations
+    async.scope(|scope| {
+        # Node 1 operations
+        scope.spawn(async {
+            for i in 1..=5 {
+                node1.send(Increment { amount: i }).await
+                async.sleep_ms(200).await
+            }
+        })
+        
+        # Node 2 operations
+        scope.spawn(async {
+            for i in 1..=3 {
+                node2.send(Increment { amount: i * 2 }).await
+                async.sleep_ms(300).await
+            }
+        })
+        
+        # Node 3 operations
+        scope.spawn(async {
+            for i in 1..=4 {
+                node3.send(Increment { amount: i * 3 }).await
+                async.sleep_ms(250).await
+            }
+        })
+        
+        # Periodic synchronization
+        scope.spawn(async {
+            for _ in 0..3 {
+                async.sleep_ms(1000).await
+                
+                # Get counts from all nodes
+                let (s1, r1) = channel.oneshot()
+                let (s2, r2) = channel.oneshot()
+                let (s3, r3) = channel.oneshot()
+                
+                node1.send(RequestSync { respond_to: s1 }).await
+                node2.send(RequestSync { respond_to: s2 }).await
+                node3.send(RequestSync { respond_to: s3 }).await
+                
+                let (count1, count2, count3) = async.join3(
+                    r1.recv(), r2.recv(), r3.recv()
+                ).await
+                
+                if let (Ok(c1), Ok(c2), Ok(c3)) = (count1, count2, count3) {
+                    println("Sync round - Node1: {}, Node2: {}, Node3: {}", c1, c2, c3)
+                    
+                    # Broadcast sync messages
+                    node1.send(Sync { other_count: c2.max(c3), from_node: "sync".to_string() }).await
+                    node2.send(Sync { other_count: c1.max(c3), from_node: "sync".to_string() }).await
+                    node3.send(Sync { other_count: c1.max(c2), from_node: "sync".to_string() }).await
+                }
+            }
+        })
+    }).await
+    
+    # Final state check
+    async.sleep_ms(500).await
+    
+    let (s1, r1) = channel.oneshot()
+    let (s2, r2) = channel.oneshot()
+    let (s3, r3) = channel.oneshot()
+    
+    node1.send(GetCount { respond_to: s1 }).await
+    node2.send(GetCount { respond_to: s2 }).await
+    node3.send(GetCount { respond_to: s3 }).await
+    
+    let (final1, final2, final3) = async.join3(
+        r1.recv(), r2.recv(), r3.recv()
+    ).await
+    
+    if let (Ok(f1), Ok(f2), Ok(f3)) = (final1, final2, final3) {
+        println("Final counts - Node1: {}, Node2: {}, Node3: {}", f1, f2, f3)
+    }
+}
+
+# Error handling in concurrent contexts
+async fn error_handling_demo() {
+    println("=== Concurrent Error Handling Demo ===")
+    
+    # Function that might fail
+    async fn risky_operation(id: i32) -> Result<i32, String> {
+        async.sleep_ms(100).await
+        
+        if id % 3 == 0 {
+            Err(format!("Operation {} failed", id))
+        } else {
+            Ok(id * 2)
+        }
+    }
+    
+    # Try all operations, collect successes and failures
+    let tasks: Vec<_> = (1..=10)
+        .map(|i| async.spawn(risky_operation(i)))
+        .collect()
+    
+    let results = async.join_all(tasks).await
+    
+    let mut successes = Vec::new()
+    let mut failures = Vec::new()
+    
+    for (i, result) in results.into_iter().enumerate() {
+        match result {
+            Ok(value) => successes.push((i + 1, value)),
+            Err(error) => failures.push((i + 1, error))
+        }
+    }
+    
+    println("Successes: {:?}", successes)
+    println("Failures: {:?}", failures)
+}
+
+# Utility functions
+fn get_time() -> f32 {
+    # This would return actual time in seconds
+    0.0
+}
+
+fn get_timestamp() -> u64 {
+    # This would return current timestamp
+    0
+}
+
+# Main function demonstrating all concurrency features
+async fn main() -> Result<(), String> {
+    println("=== STARTING Aether Concurrency and Actor System Example ===")
+    println("==========================================")
+    
+    weather_monitoring_system().await?
+    println()
+    
+    parallel_processing_demo()
+    println()
+    
+    work_stealing_demo().await
+    println()
+    
+    producer_consumer_demo().await
+    println()
+    
+    distributed_system_demo().await
+    println()
+    
+    error_handling_demo().await
+    
+    println("All concurrency examples completed!")
+    println("=== FINISHED Aether Concurrency and Actor System Example ===")
+    Ok(())
+}

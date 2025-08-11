@@ -1,0 +1,25 @@
+# AI-Focused Canonical Syntax: Neural Network Definition (Simplified)
+# This example demonstrates basic neural network concepts in S-expression form
+
+(func main ()
+  (call print "=== STARTING AI Canonical Neural Network Example ===")
+  
+  (call print "Initializing neural network model...")
+  (let model_size 784)
+  (let hidden_size 512)
+  (let output_size 10)
+  
+  (call print "Model architecture:")
+  (call print "Input size: 784")
+  (call print "Hidden size: 512") 
+  (call print "Output size: 10")
+  
+  (call print "Starting training simulation...")
+  (for epoch (range 5)
+    (call print "Training epoch" epoch))
+  
+  (call print "Training completed.")
+  (call print "Model saved successfully.")
+  
+  (call print "=== FINISHED AI Canonical Neural Network Example ===")
+  (return 0)))

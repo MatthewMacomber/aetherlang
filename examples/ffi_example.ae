@@ -1,0 +1,272 @@
+# Aether FFI Example
+# Demonstrates Foreign Function Interface capabilities
+
+# Import FFI module
+import ffi
+
+# C Library Integration Example
+ffi.bind_c_library {
+    name: "math_lib"
+    header: "math.h"
+    functions: [
+        {
+            c_name: "sqrt"
+            aether_name: "square_root"
+            params: [(x: Float64)]
+            returns: Float64
+            thread_safe: true
+        }
+        {
+            c_name: "pow"
+            aether_name: "power"
+            params: [(base: Float64), (exp: Float64)]
+            returns: Float64
+            thread_safe: true
+        }
+        {
+            c_name: "sin"
+            aether_name: "sine"
+            params: [(x: Float64)]
+            returns: Float64
+            thread_safe: true
+        }
+    ]
+    link_libraries: ["m"]
+}
+
+# Rust Library Integration Example
+ffi.bind_rust_crate {
+    name: "image_processing"
+    crate_path: "./rust_image_lib"
+    functions: [
+        {
+            rust_name: "resize_image"
+            aether_name: "resize"
+            params: [
+                (image: Tensor<UInt8, [H, W, 3]>),
+                (new_width: UInt32),
+                (new_height: UInt32)
+            ]
+            returns: Tensor<UInt8, [new_height, new_width, 3]>
+            ownership: "move"
+        }
+        {
+            rust_name: "apply_filter"
+            aether_name: "filter"
+            params: [
+                (image: &Tensor<UInt8, [H, W, 3]>),
+                (filter_type: String)
+            ]
+            returns: Tensor<UInt8, [H, W, 3]>
+            ownership: "borrow"
+        }
+    ]
+}
+
+# JavaScript/WebAssembly Integration Example
+ffi.bind_js_module {
+    name: "web_utils"
+    module_path: "./js/utils.js"
+    functions: [
+        {
+            js_name: "fetchData"
+            aether_name: "fetch_data"
+            params: [(url: String)]
+            returns: Promise<String>
+            async: true
+        }
+        {
+            js_name: "renderChart"
+            aether_name: "render_chart"
+            params: [
+                (data: Tensor<Float32, [N]>),
+                (canvas_id: String)
+            ]
+            returns: Unit
+            async: false
+        }
+    ]
+}
+
+# ML Framework Integration Example
+ffi.bind_ml_framework {
+    framework: "ONNX"
+    model_path: "./models/image_classifier.onnx"
+    model_name: "classifier"
+    inputs: [
+        {
+            name: "image"
+            type: Tensor<Float32, [1, 224, 224, 3]>
+            preprocessing: "normalize_0_1"
+        }
+    ]
+    outputs: [
+        {
+            name: "predictions"
+            type: Tensor<Float32, [1, 1000]>
+            postprocessing: "softmax"
+        }
+    ]
+}
+
+# Custom C++ Library Integration
+ffi.bind_cpp_library {
+    name: "physics_engine"
+    headers: ["physics.hpp"]
+    namespace: "Physics"
+    classes: [
+        {
+            cpp_name: "RigidBody"
+            aether_name: "RigidBody"
+            constructor: [(mass: Float32), (position: Tensor<Float32, [3]>)]
+            methods: [
+                {
+                    cpp_name: "applyForce"
+                    aether_name: "apply_force"
+                    params: [(force: Tensor<Float32, [3]>)]
+                    returns: Unit
+                    mutating: true
+                }
+                {
+                    cpp_name: "getPosition"
+                    aether_name: "position"
+                    params: []
+                    returns: Tensor<Float32, [3]>
+                    mutating: false
+                }
+            ]
+        }
+    ]
+    link_libraries: ["physics_engine", "stdc++"]
+}
+
+# Function using C math library
+fn calculate_distance(p1: Tensor<Float64, [2]>, p2: Tensor<Float64, [2]>) -> Float64 {
+    let dx = p2[0] - p1[0]
+    let dy = p2[1] - p1[1]
+    square_root(power(dx, 2.0) + power(dy, 2.0))
+}
+
+# Function using Rust image processing
+fn process_image(input_path: String, output_path: String) -> Result<Unit, String> {
+    # Load image (hypothetical Aether image loading)
+    let image = load_image(input_path)?
+    
+    # Resize using Rust FFI
+    let resized = resize(image, 512, 512)
+    
+    # Apply filter using Rust FFI
+    let filtered = filter(&resized, "blur")
+    
+    # Save result
+    save_image(filtered, output_path)
+}
+
+# Function using ML model
+fn classify_image(image_path: String) -> Result<String, String> {
+    # Load and preprocess image
+    let image = load_image(image_path)?
+    let preprocessed = preprocess_for_classifier(image)
+    
+    # Run inference using ONNX model
+    let predictions = classifier.infer(preprocessed)?
+    
+    # Get top prediction
+    let class_id = argmax(predictions)
+    get_class_name(class_id)
+}
+
+# Function using C++ physics engine
+fn simulate_physics(bodies: Vec<RigidBody>, time_step: Float32, steps: UInt32) -> Vec<Tensor<Float32, [3]>> {
+    let mut positions = Vec::new()
+    
+    for step in 0..steps {
+        # Apply gravity to all bodies
+        for body in &mut bodies {
+            let gravity = tensor([0.0, -9.81, 0.0])
+            body.apply_force(gravity)
+        }
+        
+        # Record positions
+        for body in &bodies {
+            positions.push(body.position())
+        }
+        
+        # Advance simulation (hypothetical)
+        advance_simulation(time_step)
+    }
+    
+    positions
+}
+
+# Function using JavaScript integration (for web deployment)
+@target(wasm)
+fn create_interactive_chart(data: Tensor<Float32, [N]>) -> Promise<Unit> {
+    # Fetch additional data from web API
+    let extra_data = fetch_data("https://api.example.com/data").await?
+    
+    # Combine data
+    let combined = combine_data(data, parse_json(extra_data))
+    
+    # Render chart in browser
+    render_chart(combined, "chart-canvas")
+}
+
+# Error handling with FFI
+fn safe_math_operation(x: Float64) -> Result<Float64, String> {
+    if x < 0.0 {
+        Err("Cannot take square root of negative number")
+    } else {
+        Ok(square_root(x))
+    }
+}
+
+# Memory management with linear types
+fn process_large_tensor(data: linear Tensor<Float32, [N, M]>) -> linear Tensor<Float32, [N, M]> {
+    # Data is moved into this function, ensuring no copies
+    let processed = apply_expensive_operation(data) # data is consumed here
+    processed # ownership transferred to caller
+}
+
+# GPU integration with FFI
+@gpu
+fn gpu_accelerated_computation(input: Tensor<Float32, [N, M]>) -> Tensor<Float32, [N, M]> {
+    # This could call CUDA kernels through FFI
+    cuda_kernel_wrapper(input)
+}
+
+# Main function demonstrating various FFI capabilities
+fn main() -> Result<Unit, String> {
+    println("=== STARTING Aether FFI Example ===")
+    
+    # Test C math functions
+    println("Testing C math functions...")
+    let result = calculate_distance(tensor([0.0, 0.0]), tensor([3.0, 4.0]))
+    println("Distance: {}", result)
+    
+    # Test Rust image processing
+    println("Testing Rust image processing...")
+    process_image("input.jpg", "output.jpg")?
+    
+    # Test ML model inference
+    println("Testing ML model inference...")
+    let classification = classify_image("test_image.jpg")?
+    println("Classification: {}", classification)
+    
+    # Test C++ physics simulation
+    println("Testing C++ physics simulation...")
+    let body1 = RigidBody(1.0, tensor([0.0, 10.0, 0.0]))
+    let body2 = RigidBody(2.0, tensor([5.0, 10.0, 0.0]))
+    let positions = simulate_physics(vec![body1, body2], 0.016, 60)
+    println("Simulated {} positions", positions.len())
+    
+    # Test JavaScript integration (web target only)
+    @if(target == "wasm") {
+        println("Testing JavaScript integration...")
+        let chart_data = tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+        create_interactive_chart(chart_data).await?
+    }
+    
+    println("=== FINISHED Aether FFI Example ===")
+    Ok(())
+}

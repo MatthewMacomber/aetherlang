@@ -1,0 +1,62 @@
+﻿Aether: Project and Programming Guide
+This document outlines a structured plan for the development of the Aether programming language and its associated toolchain, as detailed in the "Aether: A Unified Design for an AI-Native Programming Language" whitepaper.
+1. Project Phases and Milestones
+The development of Aether is broken down into four distinct phases, each with specific goals and deliverables.
+Phase 1: Core Language and Compiler Infrastructure (Months 1-6)
+Objective: To establish the foundational elements of the Aether language, including the parser, the canonical S-expression representation, and the initial compiler backend.
+* Milestone 1.1: Specification of the Canonical Core. Formalize the grammar and structure of the S-expression-based canonical form, including the representation of graphs.
+* Milestone 1.2: "Sweet" Syntax Transpiler (aetherfmt). Develop the bidirectional transpiler between the human-friendly "sweet" syntax and the canonical core.
+* Milestone 1.3: Core Parser and AST. Implement the parser to transform Aether code into an Abstract Syntax Tree (AST) based on the canonical representation.
+* Milestone 1.4: MLIR Integration and LLVM Backend.
+   * Define a high-level Aether dialect for MLIR.
+   * Implement the initial compiler pipeline to lower the Aether dialect to the LLVM IR dialect.
+   * Achieve compilation of basic procedural code to native executables for CPU (x86, ARM).
+Phase 2: Type System and AI Primitives (Months 7-12)
+Objective: To implement Aether's advanced type system and integrate first-class support for fundamental AI constructs.
+* Milestone 2.1: Gradual Type System. Implement the type checker to support both dynamic and static typing.
+* Milestone 2.2: Dependent Types for Tensors. Extend the type system to encode tensor shapes, enabling compile-time dimension checking.
+* Milestone 2.3: Linear Types for Resource Management. Integrate a linear type system to manage memory and ensure concurrency safety.
+* Milestone 2.4: Native Tensor Type and Operations. Implement the Tensor type as a language primitive and build out a library of core tensor operations.
+* Milestone 2.5: Automatic Differentiation Engine. Implement the diff keyword and the underlying machinery for both dynamic and static differentiation.
+Phase 3: Advanced Features and Hardware Support (Months 13-18)
+Objective: To expand Aether's capabilities with advanced AI paradigms and broaden its hardware target support.
+* Milestone 3.1: GPU and Accelerator Backends.
+   * Develop MLIR lowering paths to GPU dialects (SPIR-V, CUDA).
+   * Enable compilation of Aether code for execution on NVIDIA and AMD GPUs.
+* Milestone 3.2: WebAssembly Backend. Implement a robust WebAssembly backend for high-performance browser and serverless execution.
+* Milestone 3.3: Probabilistic and Logical Primitives. Integrate native syntax and compiler support for probabilistic and logical programming.
+* Milestone 3.4: Neural Network DSL. Develop the high-level, declarative syntax for defining neural network architectures.
+* Milestone 3.5: Structured Concurrency. Implement high-level parallelism constructs (parallel_for, pipeline).
+Phase 4: Ecosystem and AI-Native Tooling (Months 19-24)
+Objective: To build a rich development ecosystem around Aether, with a focus on AI-assisted programming.
+* Milestone 4.1: AI-Assisted IDE. Develop an IDE with deep language integration, including reliable program synthesis, semantic refactoring, and visual programming capabilities.
+* Milestone 4.2: Static Analyzer (aether-analyze). Create a tool for pre-execution analysis of tensor shapes, memory usage, and GPU occupancy.
+* Milestone 4.3: Foreign Function Interface (FFI). Implement a seamless FFI for interoperability with C, C++, and Rust libraries.
+* Milestone 4.4: Explainability (XAI) Hooks. Integrate intrinsic compiler support for generating computation traces and standardized metadata for XAI tools.
+* Milestone 4.5: Community and Documentation. Launch a comprehensive documentation website with tutorials, examples, and API references. Foster a user and contributor community.
+2. Programming and Architectural Guide
+This section provides guidelines for developers contributing to the Aether project.
+2.1. Core Principles
+* Modularity: The compiler and toolchain should be designed as a collection of modular, well-defined components.
+* Test-Driven Development (TDD): All new features must be accompanied by a comprehensive suite of unit and integration tests.
+* Canonical Form as the Source of Truth: All transformations, analyses, and optimizations must operate on the canonical S-expression representation. The "sweet" syntax is a presentation layer only.
+* Leverage MLIR: Maximize the use of MLIR's infrastructure for optimization and code generation. Avoid reinventing the wheel.
+2.2. Technology Stack
+* Compiler Development: C++ or Rust are the recommended languages for building the Aether compiler, leveraging their performance and systems-level capabilities.
+* Compiler Framework: MLIR is the core framework for the compiler's intermediate representation and optimization passes.
+* Backend Generation: LLVM will be used for CPU targets. Specific GPU toolchains (e.g., CUDA, ROCm) will be required for GPU backends.
+* Tooling: The IDE and other developer tools can be built using standard frameworks (e.g., Electron, VS Code extensions).
+2.3. Coding Standards
+* Style Guide: A consistent coding style will be enforced for the compiler and toolchain source code.
+* Documentation: All public APIs, complex algorithms, and MLIR dialects must be thoroughly documented.
+* Error Handling: The compiler must produce clear, actionable error messages for both syntactic and semantic issues.
+2.4. Workflow for Adding a New Feature
+1. Proposal: Create a brief design document outlining the feature, its syntax (both "sweet" and canonical), and its impact on the type system and compiler.
+2. Canonical Form Update: If necessary, update the specification of the canonical S-expression form to support the new feature.
+3. Parser and Transpiler: Update aetherfmt and the parser to handle the new syntax.
+4. AST Representation: Extend the AST to represent the new feature.
+5. MLIR Dialect Extension: Add the necessary operations and types to the Aether MLIR dialect.
+6. Type Checking: Implement the required logic in the type checker to validate the new feature.
+7. Compiler Lowering: Write the MLIR passes to lower the new feature from the Aether dialect to more generic dialects.
+8. Testing: Add comprehensive tests covering all aspects of the new feature.
+9. Documentation: Update the official language documentation to include the new feature.

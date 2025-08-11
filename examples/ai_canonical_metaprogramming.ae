@@ -1,0 +1,272 @@
+# AI-Focused Canonical Syntax: Metaprogramming and Code Generation
+# Demonstrates how the canonical S-expression form enables powerful metaprogramming
+# Perfect for AI systems that need to generate, analyze, and transform code
+
+(module metaprogramming
+  
+  # Macro for generating repetitive neural network layers
+  (macro generate_layers ((layer_type symbol) (sizes list) (activation symbol))
+    (let layers (list))
+    (for i (range (- (length sizes) 1))
+      (let in_size (index sizes i))
+      (let out_size (index sizes (+ i 1)))
+      (let layer_expr 
+        (list layer_type 
+              (list 'in in_size) 
+              (list 'out out_size) 
+              (list 'activation activation)))
+      (append layers layer_expr))
+    layers)
+  
+  # Code template for generating optimized tensor operations
+  (template tensor_op ((op symbol) (shapes list))
+    (let input_vars (map (fn (i) (symbol (concat "input_" i))) (range (length shapes))))
+    (let shape_checks 
+      (map (fn (var shape) 
+             (list 'assert (list 'eq (list 'shape var) shape)))
+           input_vars shapes))
+    
+    # Generate the operation
+    (list 'fn (symbol (concat (str op) "_optimized"))
+          (zip input_vars (map (fn (s) (list 'Tensor 'f32 s)) shapes))
+          (concat shape_checks
+                  (list (cons op input_vars)))))
+  
+  # Automatic differentiation code generation
+  (fn generate_autodiff ((expr sexp))
+    (cond
+      # Base cases
+      ((atom? expr) 
+       (if (variable? expr) 
+           (list 'grad expr)
+           0))
+      
+      # Addition rule: d(a + b) = da + db
+      ((eq (first expr) '+)
+       (let args (rest expr))
+       (cons '+ (map generate_autodiff args)))
+      
+      # Multiplication rule: d(a * b) = da * b + a * db
+      ((eq (first expr) '*)
+       (let a (second expr))
+       (let b (third expr))
+       (list '+ 
+             (list '* (generate_autodiff a) b)
+             (list '* a (generate_autodiff b))))
+      
+      # Chain rule for function composition
+      ((function_call? expr)
+       (let func (first expr))
+       (let args (rest expr))
+       (let func_grad (get_derivative func))
+       (list '* func_grad (map generate_autodiff args)))
+      
+      # Default case
+      (else (error "Unknown expression type"))))
+  
+  # Code analysis and transformation
+  (fn analyze_computation_graph ((expr sexp))
+    (let nodes (list))
+    (let edges (list))
+    
+    # Traverse expression tree
+    (fn traverse ((node sexp) (parent symbol))
+      (cond
+        ((atom? node)
+         (append nodes (list 'node node (list 'type 'leaf))))
+        
+        ((list? node)
+         (let op (first node))
+         (let node_id (gensym))
+         (append nodes (list 'node node_id (list 'type 'op) (list 'operation op)))
+         
+         (when parent
+           (append edges (list 'edge parent node_id)))
+         
+         # Recursively process children
+         (for child (rest node)
+           (traverse child node_id)))))
+    
+    (traverse expr nil)
+    (list 'graph (list 'nodes nodes) (list 'edges edges)))
+  
+  # Generate optimized CUDA kernel code
+  (fn generate_cuda_kernel ((operation symbol) (tensor_shapes list))
+    (let kernel_name (symbol (concat (str operation) "_kernel")))
+    (let thread_code
+      (cond
+        ((eq operation 'matmul)
+         '(let tid_x (+ (* blockIdx.x blockDim.x) threadIdx.x))
+         '(let tid_y (+ (* blockIdx.y blockDim.y) threadIdx.y))
+         '(when (and (< tid_x N) (< tid_y M))
+            (let sum 0.0)
+            (for k (range K)
+              (set sum (+ sum (* (index A tid_y k) (index B k tid_x)))))
+            (set C tid_y tid_x sum)))
+        
+        ((eq operation 'elementwise_add)
+         '(let tid (+ (* blockIdx.x blockDim.x) threadIdx.x))
+         '(when (< tid N)
+            (set C tid (+ (index A tid) (index B tid)))))
+        
+        (else (error "Unsupported operation"))))
+    
+    # Generate complete kernel
+    (list 'cuda_kernel kernel_name
+          (list 'params 
+                (map (fn (shape) (list 'Tensor 'f32 shape)) tensor_shapes))
+          thread_code))
+  
+  # Dynamic code specialization based on tensor shapes
+  (fn specialize_for_shapes ((generic_fn sexp) (concrete_shapes list))
+    (let specialized_body
+      (transform generic_fn
+        (fn (node)
+          (cond
+            # Replace dynamic shape queries with constants
+            ((and (list? node) (eq (first node) 'shape))
+             (let tensor_name (second node))
+             (let shape_idx (find_tensor_index tensor_name))
+             (index concrete_shapes shape_idx))
+            
+            # Unroll loops with known bounds
+            ((and (list? node) (eq (first node) 'for))
+             (let var (second node))
+             (let range_expr (third node))
+             (let body (fourth node))
+             (if (constant? range_expr)
+                 (unroll_loop var range_expr body)
+                 node))
+            
+            (else node)))))
+    
+    specialized_body)
+  
+  # Generate test cases automatically
+  (fn generate_tests ((function_def sexp))
+    (let func_name (second function_def))
+    (let params (third function_def))
+    (let test_cases (list))
+    
+    # Generate edge cases
+    (for param params
+      (let param_name (first param))
+      (let param_type (second param))
+      
+      (cond
+        # Tensor parameters - test with different shapes
+        ((tensor_type? param_type)
+         (let shapes (list [1] [10] [100] [1000]))
+         (for shape shapes
+           (let test_input (list 'randn shape))
+           (let test_case 
+             (list 'test (symbol (concat (str func_name) "_shape_" (str shape)))
+                   (list 'let param_name test_input)
+                   (list 'assert (list 'not (list 'isnan (list func_name param_name))))))
+           (append test_cases test_case)))
+        
+        # Numeric parameters - test boundary values
+        ((numeric_type? param_type)
+         (let values (list 0 1 -1 1000 -1000))
+         (for value values
+           (let test_case
+             (list 'test (symbol (concat (str func_name) "_value_" (str value)))
+                   (list 'assert (list 'not (list 'isnan (list func_name value))))))
+           (append test_cases test_case)))))
+    
+    test_cases)
+  
+  # Performance optimization through code transformation
+  (fn optimize_expression ((expr sexp))
+    (transform expr
+      (fn (node)
+        (cond
+          # Constant folding
+          ((and (list? node) (all_constants? (rest node)))
+           (eval node))
+          
+          # Strength reduction: x * 2 -> x + x
+          ((and (list? node) (eq (first node) '*) (eq (third node) 2))
+           (list '+ (second node) (second node)))
+          
+          # Dead code elimination
+          ((and (list? node) (eq (first node) '*) (eq (third node) 0))
+           0)
+          
+          # Loop fusion opportunity detection
+          ((consecutive_loops? node)
+           (fuse_loops node))
+          
+          (else node)))))
+  
+  # Example: Generate a complete neural network from specification
+  (fn generate_network ((spec dict))
+    (let layers (get spec 'layers))
+    (let activation (get spec 'activation))
+    (let network_code (list 'net (get spec 'name)))
+    
+    # Generate layer definitions
+    (for layer layers
+      (let layer_type (get layer 'type))
+      (let layer_params (get layer 'params))
+      (let layer_code
+        (cond
+          ((eq layer_type 'dense)
+           (list 'dense 
+                 (list 'in (get layer_params 'input_size))
+                 (list 'out (get layer_params 'output_size))
+                 (list 'activation activation)))
+          
+          ((eq layer_type 'conv)
+           (list 'conv2d
+                 (list 'channels (get layer_params 'channels))
+                 (list 'kernel (get layer_params 'kernel_size))
+                 (list 'activation activation)))
+          
+          (else (error "Unknown layer type"))))
+      
+      (append network_code layer_code))
+    
+    network_code)
+  
+  # Main demonstration function
+  (fn main ()
+    (print "=== STARTING AI Canonical Metaprogramming Example ===")
+    
+    # Example 1: Generate layers using macro
+    (print "Generating MLP layers using macro...")
+    (let mlp_layers (generate_layers 'dense [784 512 256 10] 'relu))
+    (print "Generated MLP layers:" mlp_layers)
+    
+    # Example 2: Automatic differentiation
+    (print "Performing automatic differentiation...")
+    (let expr '(+ (* x y) (sin z)))
+    (let grad_expr (generate_autodiff expr))
+    (print "Original expression:" expr)
+    (print "Gradient expression:" grad_expr)
+    
+    # Example 3: Computation graph analysis
+    (print "Analyzing computation graph...")
+    (let graph (analyze_computation_graph expr))
+    (print "Computation graph:" graph)
+    
+    # Example 4: CUDA kernel generation
+    (print "Generating CUDA kernel...")
+    (let kernel (generate_cuda_kernel 'matmul [[M K] [K N] [M N]]))
+    (print "Generated CUDA kernel:" kernel)
+    
+    # Example 5: Code specialization
+    (print "Specializing generic function for concrete shapes...")
+    (let generic_fn '(fn matrix_multiply ((a Tensor) (b Tensor))
+                       (for i (range (shape a 0))
+                         (for j (range (shape b 1))
+                           (for k (range (shape a 1))
+                             (set result i j 
+                                  (+ (index result i j)
+                                     (* (index a i k) (index b k j)))))))))
+    
+    (let specialized (specialize_for_shapes generic_fn [[100 50] [50 75]]))
+    (print "Specialized function:" specialized)
+    
+    (print "=== FINISHED AI Canonical Metaprogramming Example ===")
+    (return 0)))

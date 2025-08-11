@@ -1,0 +1,23 @@
+# AI-Focused Canonical Syntax: Tensor Operations (Simplified)
+# Demonstrates basic tensor operations in S-expression form
+
+(func main ()
+  (call print "=== STARTING AI Canonical Tensor Operations Example ===")
+  
+  (call print "Creating sample tensors...")
+  (let batch_size 32)
+  (let seq_len 128)
+  (let d_model 512)
+  
+  (call print "Batch size:" batch_size)
+  (call print "Sequence length:" seq_len)
+  (call print "Model dimension:" d_model)
+  
+  (call print "Simulating tensor operations...")
+  (let result (+ batch_size seq_len))
+  (call print "Sample computation result:" result)
+  
+  (call print "Tensor operations completed successfully.")
+  
+  (call print "=== FINISHED AI Canonical Tensor Operations Example ===")
+  (return 0)))
