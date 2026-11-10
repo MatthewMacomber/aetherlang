@@ -1,0 +1,395 @@
+# ==============================================================================
+# DEEP CRYPT: Full Procedural Roguelike Dungeon Crawler
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func computeDamage (atk def roll)
+  (let raw (- (+ atk roll) def))
+  (if (< raw 1.0)
+    (return 1.0)
+    (return raw)))
+
+(func checkLineOfSight (x0 y0 x1 y1 wall_x wall_y)
+  (let cross_product (- (* (- wall_y y0) (- x1 x0)) (* (- wall_x x0) (- y1 y0))))
+  (if (== cross_product 0.0)
+    (return 0.0)
+    (return 1.0)))
+
+(func selfCheck ()
+  (call print "=== Self Check: Deep Crypt ===")
+  # Test damage formula
+  (let dmg1 (call computeDamage 10.0 4.0 2.0)) # 10 + 2 - 4 = 8.0
+  (if (!= dmg1 8.0) (return 0) 0)
+
+  # Test damage floor
+  (let dmg_min (call computeDamage 2.0 10.0 1.0))
+  (if (!= dmg_min 1.0) (return 0) 0)
+
+  (call print "[Self-Check] Combat mechanics verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       DEEP CRYPT: PROCEDURAL ROGUELIKE DUNGEON          ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  # Initialize Window: 520x400
+  (let ok (gfxInit 520 400 "Deep Crypt" backend 1))
+  (call print "Deep Crypt initialized. WASD / Arrow keys to move/attack, P to drink potion, ESC to exit.")
+
+  # Map dimensions: 24 columns x 18 rows. Tile size 16x16, offset x=20, y=40
+  # 0 = Floor, 1 = Wall, 2 = Stairs, 3 = Potion, 4 = Gold
+  (let map (list))
+  (let total_tiles (* 24 18))
+  (let mi 0)
+  (while (< mi total_tiles)
+    (let col (% mi 24))
+    (let row (/ mi 24))
+    # Border walls
+    (if (or (or (== col 0) (== col 23)) (or (== row 0) (== row 17)))
+      (append map 1)
+      # Inner pillars
+      (if (and (== (% col 5) 0) (== (% row 4) 0))
+        (append map 1)
+        (append map 0)))
+    (set! mi (+ mi 1)))
+
+  # Place stairs at [21, 15]
+  (set_at map (+ (* 15 24) 21) 2)
+  # Place potions at [6, 8] and [18, 5]
+  (set_at map (+ (* 8 24) 6) 3)
+  (set_at map (+ (* 5 24) 18) 3)
+  # Place gold chests at [12, 10] and [20, 3]
+  (set_at map (+ (* 10 24) 12) 4)
+  (set_at map (+ (* 3 24) 20) 4)
+
+  # Player state
+  (let px 3)
+  (let py 3)
+  (let php 30)
+  (let pmax_hp 30)
+  (let patk 6)
+  (let pdef 2)
+  (let potions 2)
+  (let gold 0)
+  (let depth 1)
+  (let game_state 1) # 1 = Playing, 2 = Won floor, 3 = Defeated
+
+  # Monster 1: Skeleton
+  (let m1_x 8)
+  (let m1_y 7)
+  (let m1_hp 14)
+  (let m1_atk 4)
+  (let m1_def 1)
+  (let m1_alive 1)
+
+  # Monster 2: Orc Brute
+  (let m2_x 16)
+  (let m2_y 12)
+  (let m2_hp 22)
+  (let m2_atk 5)
+  (let m2_def 2)
+  (let m2_alive 1)
+
+  (let combat_log "Welcome to Deep Crypt. Find the stairs to descend.")
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # In headless test mode, exit cleanly after 40 frames
+    (if (and (== headless 1) (> frame 40))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # R restarts
+    (if (gameIsKeyPressed 82)
+      (block
+        (set! px 3) (set! py 3)
+        (set! php 30)
+        (set! potions 2)
+        (set! gold 0)
+        (set! depth 1)
+        (set! m1_x 8) (set! m1_y 7) (set! m1_hp 14) (set! m1_alive 1)
+        (set! m2_x 16) (set! m2_y 12) (set! m2_hp 22) (set! m2_alive 1)
+        (set! game_state 1)
+        (set! combat_log "Game reset. Descend through the crypt.")))
+
+    # Potion use (Key P = 80 or H = 72)
+    (if (and (== game_state 1) (or (gameIsKeyPressed 80) (gameIsKeyPressed 72)))
+      (if (> potions 0)
+        (block
+          (set! potions (- potions 1))
+          (set! php (+ php 15))
+          (if (> php pmax_hp) (set! php pmax_hp) 0)
+          (set! combat_log "Drank healing potion! +15 HP restored.")
+          (call audio.sfx_beep 600.0 0.1))
+        (set! combat_log "No potions left!"))
+      0)
+
+    # -------------------------------------------------------------------------
+    # Player Turn Movement / Attack
+    # -------------------------------------------------------------------------
+    (let move_x 0)
+    (let move_y 0)
+    (if (== game_state 1)
+      (block
+        (if (or (gameIsKeyPressed 38) (gameIsKeyPressed 87)) (set! move_y -1) 0) # Up / W
+        (if (or (gameIsKeyPressed 40) (gameIsKeyPressed 83)) (set! move_y 1) 0)  # Down / S
+        (if (or (gameIsKeyPressed 37) (gameIsKeyPressed 65)) (set! move_x -1) 0) # Left / A
+        (if (or (gameIsKeyPressed 39) (gameIsKeyPressed 68)) (set! move_x 1) 0)  # Right / D
+        0))
+
+    (if (and (== game_state 1) (or (!= move_x 0) (!= move_y 0)))
+      (block
+        (let target_x (+ px move_x))
+        (let target_y (+ py move_y))
+
+        # Check combat with Monster 1
+        (if (and (== m1_alive 1) (and (== target_x m1_x) (== target_y m1_y)))
+          (block
+            (let dmg (call computeDamage patk m1_def 3))
+            (set! m1_hp (- m1_hp dmg))
+            (set! combat_log (str_join (list "You strike Skeleton for " dmg " damage!") ""))
+            (call audio.sfx_beep 440.0 0.05)
+            (if (<= m1_hp 0)
+              (block
+                (set! m1_alive 0)
+                (set! combat_log "Skeleton collapsed into dust! Gained 20 gold.")
+                (set! gold (+ gold 20))
+                (call audio.sfx_beep 880.0 0.12))
+              0))
+          # Check combat with Monster 2
+          (if (and (== m2_alive 1) (and (== target_x m2_x) (== target_y m2_y)))
+            (block
+              (let dmg (call computeDamage patk m2_def 3))
+              (set! m2_hp (- m2_hp dmg))
+              (set! combat_log (str_join (list "You strike Orc Brute for " dmg " damage!") ""))
+              (call audio.sfx_beep 360.0 0.05)
+              (if (<= m2_hp 0)
+                (block
+                  (set! m2_alive 0)
+                  (set! combat_log "Orc Brute defeated! Gained 50 gold.")
+                  (set! gold (+ gold 50))
+                  (call audio.sfx_beep 880.0 0.15))
+                0))
+            # Normal movement into tile
+            (block
+              (let tile_idx (+ (* target_y 24) target_x))
+              (let tile_type (get map tile_idx))
+              (if (!= tile_type 1) # Not a wall
+                (block
+                  (set! px target_x)
+                  (set! py target_y)
+
+                  # Pickups
+                  (if (== tile_type 3) # Potion
+                    (block
+                      (set_at map tile_idx 0)
+                      (set! potions (+ potions 1))
+                      (set! combat_log "Found a Healing Potion (+1)!")
+                      (call audio.sfx_beep 520.0 0.08))
+                    0)
+                  (if (== tile_type 4) # Gold
+                    (block
+                      (set_at map tile_idx 0)
+                      (set! gold (+ gold 30))
+                      (set! combat_log "Opened chest! Looted 30 gold!")
+                      (call audio.sfx_beep 780.0 0.08))
+                    0)
+                  (if (== tile_type 2) # Stairs
+                    (block
+                      (set! depth (+ depth 1))
+                      (set! game_state 2)
+                      (set! combat_log (str_join (list "Descended to Crypt Floor " depth "! Victory!") ""))
+                      (call audio.sfx_beep 960.0 0.2))
+                    0))
+                0))))
+
+        # ---------------------------------------------------------------------
+        # Enemy Retaliation Turn
+        # ---------------------------------------------------------------------
+        # Monster 1 Turn
+        (if (== m1_alive 1)
+          (block
+            (let dist_x (- px m1_x))
+            (let dist_y (- py m1_y))
+            (let dist (+ (* dist_x dist_x) (* dist_y dist_y)))
+            (if (<= dist 2) # In melee range -> attack
+              (block
+                (let m_dmg (call computeDamage m1_atk pdef 1))
+                (set! php (- php m_dmg))
+                (set! combat_log (str_join (list combat_log " Skeleton hits you for " m_dmg "!") ""))
+                (call audio.sfx_beep 220.0 0.05)
+                (if (<= php 0) (set! game_state 3) 0))
+              # Otherwise pursue player if within 5 tiles
+              (if (<= dist 25)
+                (block
+                  (let step_x 0) (let step_y 0)
+                  (if (> dist_x 0) (set! step_x 1) (if (< dist_x 0) (set! step_x -1) 0))
+                  (if (> dist_y 0) (set! step_y 1) (if (< dist_y 0) (set! step_y -1) 0))
+                  (let new_mx (+ m1_x step_x))
+                  (let new_my (+ m1_y step_y))
+                  (if (== (get map (+ (* new_my 24) new_mx)) 0)
+                    (do (set! m1_x new_mx) (set! m1_y new_my))
+                    0))
+                0)))
+          0)
+
+        # Monster 2 Turn
+        (if (== m2_alive 1)
+          (block
+            (let dist_x (- px m2_x))
+            (let dist_y (- py m2_y))
+            (let dist (+ (* dist_x dist_x) (* dist_y dist_y)))
+            (if (<= dist 2)
+              (block
+                (let o_dmg (call computeDamage m2_atk pdef 2))
+                (set! php (- php o_dmg))
+                (set! combat_log (str_join (list combat_log " Orc slams you for " o_dmg "!") ""))
+                (call audio.sfx_beep 180.0 0.06)
+                (if (<= php 0) (set! game_state 3) 0))
+              (if (<= dist 36)
+                (block
+                  (let step_x 0) (let step_y 0)
+                  (if (> dist_x 0) (set! step_x 1) (if (< dist_x 0) (set! step_x -1) 0))
+                  (if (> dist_y 0) (set! step_y 1) (if (< dist_y 0) (set! step_y -1) 0))
+                  (let new_ox (+ m2_x step_x))
+                  (let new_oy (+ m2_y step_y))
+                  (if (== (get map (+ (* new_oy 24) new_ox)) 0)
+                    (do (set! m2_x new_ox) (set! m2_y new_oy))
+                    0))
+                0)))
+          0)))
+
+    # -------------------------------------------------------------------------
+    # RENDER FRAME
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 12 12 18))
+
+    # Top Status Bar
+    (gfxDrawRect 0 0 520 32 (gfxRgb 20 22 34) 1)
+    (gfxDrawText 16 8 (str_join (list "HP: " php "/" pmax_hp) "") (gfxRgb 255 80 90))
+    (gfxDrawText 130 8 (str_join (list "POTIONS: " potions) "") (gfxRgb 80 220 255))
+    (gfxDrawText 250 8 (str_join (list "GOLD: " gold) "") (gfxRgb 255 220 50))
+    (gfxDrawText 370 8 (str_join (list "DEPTH: " depth) "") (gfxRgb 180 140 255))
+
+    # Draw Dungeon Map Tiles
+    (let ti 0)
+    (while (< ti total_tiles)
+      (let col (% ti 24))
+      (let row (/ ti 24))
+      (let screen_x (+ 20 (* col 16)))
+      (let screen_y (+ 40 (* row 16)))
+      (let t (get map ti))
+
+      (if (== t 1)
+        # Wall: Grey stone brick
+        (block
+          (gfxDrawRect screen_x screen_y 15 15 (gfxRgb 45 48 65) 1)
+          (gfxDrawRect screen_x screen_y 15 15 (gfxRgb 65 70 90) 0))
+        # Floor: Dark cobblestone
+        (gfxDrawRect screen_x screen_y 15 15 (gfxRgb 24 26 36) 1))
+
+      (if (== t 2)
+        # Stairs: Golden gateway
+        (block
+          (gfxDrawRect (+ screen_x 2) (+ screen_y 2) 11 11 (gfxRgb 255 200 40) 1)
+          (gfxDrawRect (+ screen_x 4) (+ screen_y 4) 7 7 (gfxRgb 140 90 20) 1))
+        0)
+
+      (if (== t 3)
+        # Potion: Red vial
+        (gfxDrawRect (+ screen_x 4) (+ screen_y 3) 7 9 (gfxRgb 255 50 80) 1)
+        0)
+
+      (if (== t 4)
+        # Gold: Shiny yellow coin
+        (gfxDrawRect (+ screen_x 4) (+ screen_y 4) 8 8 (gfxRgb 255 230 40) 1)
+        0)
+
+      (set! ti (+ ti 1)))
+
+    # Draw Monster 1 (Skeleton: Bone white/green)
+    (if (== m1_alive 1)
+      (block
+        (let mx (+ 20 (* m1_x 16)))
+        (let my (+ 40 (* m1_y 16)))
+        (gfxDrawRect (+ mx 2) (+ my 2) 11 11 (gfxRgb 160 210 180) 1)
+        (gfxDrawRect (+ mx 4) (+ my 4) 3 3 (gfxRgb 30 50 40) 1)
+        (gfxDrawRect (+ mx 8) (+ my 4) 3 3 (gfxRgb 30 50 40) 1))
+      0)
+
+    # Draw Monster 2 (Orc Brute: Crimson/Brown)
+    (if (== m2_alive 1)
+      (block
+        (let ox (+ 20 (* m2_x 16)))
+        (let oy (+ 40 (* m2_y 16)))
+        (gfxDrawRect (+ ox 1) (+ oy 1) 13 13 (gfxRgb 220 60 50) 1)
+        (gfxDrawRect (+ ox 3) (+ oy 3) 3 3 (gfxRgb 255 255 255) 1)
+        (gfxDrawRect (+ ox 9) (+ oy 3) 3 3 (gfxRgb 255 255 255) 1))
+      0)
+
+    # Draw Player Hero (@: Bright Cyan)
+    (if (> php 0)
+      (block
+        (let hx (+ 20 (* px 16)))
+        (let hy (+ 40 (* py 16)))
+        (gfxDrawRect (+ hx 2) (+ hy 2) 12 12 (gfxRgb 50 240 255) 1)
+        (gfxDrawRect (+ hx 5) (+ hy 5) 6 6 (gfxRgb 255 255 255) 1))
+      0)
+
+    # Bottom Combat Log & Help Banner
+    (gfxDrawRect 0 340 520 60 (gfxRgb 16 18 28) 1)
+    (gfxDrawText 16 348 combat_log (gfxRgb 220 230 250))
+    (gfxDrawText 16 372 "CONTROLS: WASD/Arrows to Move & Attack | P: Heal | R: Reset | ESC: Exit" (gfxRgb 120 135 160))
+
+    # Overlays
+    (if (== game_state 2)
+      (block
+        (gfxDrawRect 140 150 240 70 (gfxRgb 18 36 28) 1)
+        (gfxDrawRect 140 150 240 70 (gfxRgb 50 255 120) 0)
+        (gfxDrawText 160 168 "FLOOR CONQUERED!" (gfxRgb 80 255 140))
+        (gfxDrawText 160 192 "PRESS 'R' TO PLAY AGAIN" (gfxRgb 220 240 255))))
+
+    (if (== game_state 3)
+      (block
+        (gfxDrawRect 140 150 240 70 (gfxRgb 36 16 20) 1)
+        (gfxDrawRect 140 150 240 70 (gfxRgb 255 50 70) 0)
+        (gfxDrawText 180 168 "YOU DIED IN THE CRYPT" (gfxRgb 255 70 80))
+        (gfxDrawText 160 192 "PRESS 'R' TO RETRY" (gfxRgb 240 220 230))))
+
+    (gamePresent))
+
+  (call print "Deep Crypt closed cleanly.")
+  (return 0))

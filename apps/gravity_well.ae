@@ -1,0 +1,329 @@
+# ==============================================================================
+# GRAVITY WELL: Full Interactive N-Body Gravity & Coalescence Sandbox
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func computeGravForce (m1 m2 dx dy G)
+  (let r_sq (+ (* dx dx) (* dy dy)))
+  (if (< r_sq 20.0) (set! r_sq 20.0) 0)
+  (let f (/ (* (* G m1) m2) r_sq))
+  (return f))
+
+(func coalesceMomentum (m1 v1 m2 v2)
+  (let total_m (+ m1 m2))
+  (if (<= total_m 0.0) (return 0.0) 0)
+  (let new_v (/ (+ (* m1 v1) (* m2 v2)) total_m))
+  (return new_v))
+
+(func selfCheck ()
+  (call print "=== Self Check: Gravity Well ===")
+  # Test gravitational force symmetry
+  (let f1 (call computeGravForce 10.0 5.0 3.0 4.0 1.0))
+  (let f2 (call computeGravForce 5.0 10.0 3.0 4.0 1.0))
+  (if (!= f1 f2) (return 0) 0)
+
+  # Test momentum conservation: m1=2, v1=4, m2=2, v2=-2 -> v_new = 1.0
+  (let v_coalesced (call coalesceMomentum 2.0 4.0 2.0 -2.0))
+  (if (!= v_coalesced 1.0) (return 0) 0)
+
+  (call print "[Self-Check] N-body gravity symmetry & momentum coalescence verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       GRAVITY WELL: N-BODY ORBITAL COALESCENCE          ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  # 560x420 Sandbox Window
+  (let ok (gfxInit 560 420 "Gravity Well: N-Body Orbital Sandbox" backend 1))
+  (call print "Gravity Well initialized. Space: Launch Probe, Arrows: Probe Thrusters, R: Reset, ESC: Exit.")
+
+  (let G 1.0)
+  (let dt 0.1)
+
+  # Body 0: Central Singularity / Star
+  (let b0_m 3600.0)
+  (let b0_x 280.0)
+  (let b0_y 210.0)
+
+  # Body 1: Primary Planet (Cyan)
+  (let b1_m 40.0)
+  (let b1_x 280.0)
+  (let b1_y 90.0)
+  (let b1_vx 5.5)
+  (let b1_vy 0.0)
+  (let b1_alive 1)
+
+  # Body 2: Natural Moon (White/Yellow orbiting Planet)
+  (let b2_m 6.0)
+  (let b2_x 280.0)
+  (let b2_y 70.0)
+  (let b2_vx 7.1)
+  (let b2_vy 0.0)
+  (let b2_alive 1)
+
+  # Body 3: Controllable Launch Probe (Green)
+  (let b3_m 3.0)
+  (let b3_x 280.0)
+  (let b3_y 350.0)
+  (let b3_vx -5.1)
+  (let b3_vy 0.0)
+  (let b3_alive 1)
+
+  # Body 4: Retrograde Comet (Magenta)
+  (let b4_m 5.0)
+  (let b4_x 120.0)
+  (let b4_y 210.0)
+  (let b4_vx 0.0)
+  (let b4_vy 4.8)
+  (let b4_alive 1)
+
+  # Probe trail points (up to 20 points)
+  (let probe_trail_x (list))
+  (let probe_trail_y (list))
+
+  (let total_coalescences 0)
+  (let frame 0)
+  (let running 1)
+
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # Headless test completes in 40 frames
+    (if (and (== headless 1) (> frame 40))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # R resets simulation
+    (if (gameIsKeyPressed 82)
+      (block
+        (set! b1_x 280.0) (set! b1_y 90.0) (set! b1_vx 5.5) (set! b1_vy 0.0) (set! b1_alive 1)
+        (set! b2_x 280.0) (set! b2_y 70.0) (set! b2_vx 7.1) (set! b2_vy 0.0) (set! b2_alive 1)
+        (set! b3_x 280.0) (set! b3_y 350.0) (set! b3_vx -5.1) (set! b3_vy 0.0) (set! b3_alive 1)
+        (set! b4_x 120.0) (set! b4_y 210.0) (set! b4_vx 0.0) (set! b4_vy 4.8) (set! b4_alive 1)
+        (set! probe_trail_x (list))
+        (set! probe_trail_y (list))))
+
+    # Space key relaunches probe from bottom
+    (if (gameIsKeyPressed 32)
+      (block
+        (set! b3_x 280.0)
+        (set! b3_y 350.0)
+        (set! b3_vx -5.2)
+        (set! b3_vy 0.0)
+        (set! b3_alive 1)
+        (set! probe_trail_x (list))
+        (set! probe_trail_y (list))
+        (call audio.sfx_beep 660.0 0.08))
+      0)
+
+    # Probe thrusters
+    (if (== b3_alive 1)
+      (block
+        (if (gameIsKeyDown 37) (set! b3_vx (- b3_vx 0.15)) 0) # Left
+        (if (gameIsKeyDown 39) (set! b3_vx (+ b3_vx 0.15)) 0) # Right
+        (if (gameIsKeyDown 38) (set! b3_vy (- b3_vy 0.15)) 0) # Up
+        (if (gameIsKeyDown 40) (set! b3_vy (+ b3_vy 0.15)) 0)) # Down
+      0)
+
+    # -------------------------------------------------------------------------
+    # Physics Integration (Body 1: Planet)
+    # -------------------------------------------------------------------------
+    (if (== b1_alive 1)
+      (block
+        (let dx01 (- b0_x b1_x))
+        (let dy01 (- b0_y b1_y))
+        (let r01 (sqrt (+ (* dx01 dx01) (* dy01 dy01))))
+        (let f01 (call computeGravForce b0_m b1_m dx01 dy01 G))
+        (let ax1 (* (/ f01 b1_m) (/ dx01 (+ r01 0.01))))
+        (let ay1 (* (/ f01 b1_m) (/ dy01 (+ r01 0.01))))
+        (set! b1_vx (+ b1_vx (* ax1 dt)))
+        (set! b1_vy (+ b1_vy (* ay1 dt)))
+        (set! b1_x (+ b1_x (* b1_vx dt)))
+        (set! b1_y (+ b1_y (* b1_vy dt))))
+      0)
+
+    # Physics Integration (Body 2: Moon influenced by Sun and Planet)
+    (if (== b2_alive 1)
+      (block
+        (let dx02 (- b0_x b2_x)) (let dy02 (- b0_y b2_y))
+        (let r02 (sqrt (+ (* dx02 dx02) (* dy02 dy02))))
+        (let f02 (call computeGravForce b0_m b2_m dx02 dy02 G))
+
+        (let dx12 (- b1_x b2_x)) (let dy12 (- b1_y b2_y))
+        (let r12 (sqrt (+ (* dx12 dx12) (* dy12 dy12))))
+        (let f12 (call computeGravForce b1_m b2_m dx12 dy12 G))
+
+        (let ax2 (+ (* (/ f02 b2_m) (/ dx02 (+ r02 0.01))) (* (/ f12 b2_m) (/ dx12 (+ r12 0.01)))))
+        (let ay2 (+ (* (/ f02 b2_m) (/ dy02 (+ r02 0.01))) (* (/ f12 b2_m) (/ dy12 (+ r12 0.01)))))
+        (set! b2_vx (+ b2_vx (* ax2 dt)))
+        (set! b2_vy (+ b2_vy (* ay2 dt)))
+        (set! b2_x (+ b2_x (* b2_vx dt)))
+        (set! b2_y (+ b2_y (* b2_vy dt))))
+      0)
+
+    # Physics Integration (Body 3: Probe)
+    (if (== b3_alive 1)
+      (block
+        (let dx03 (- b0_x b3_x)) (let dy03 (- b0_y b3_y))
+        (let r03 (sqrt (+ (* dx03 dx03) (* dy03 dy03))))
+        (let f03 (call computeGravForce b0_m b3_m dx03 dy03 G))
+        (let ax3 (* (/ f03 b3_m) (/ dx03 (+ r03 0.01))))
+        (let ay3 (* (/ f03 b3_m) (/ dy03 (+ r03 0.01))))
+        (set! b3_vx (+ b3_vx (* ax3 dt)))
+        (set! b3_vy (+ b3_vy (* ay3 dt)))
+        (set! b3_x (+ b3_x (* b3_vx dt)))
+        (set! b3_y (+ b3_y (* b3_vy dt)))
+
+        # Record probe trail
+        (if (== (% frame 3) 0)
+          (block
+            (append probe_trail_x b3_x)
+            (append probe_trail_y b3_y)
+            (if (> (length probe_trail_x) 25)
+              (block
+                (set! probe_trail_x (slice probe_trail_x 1 26))
+                (set! probe_trail_y (slice probe_trail_y 1 26)))
+              0))
+          0))
+      0)
+
+    # Physics Integration (Body 4: Comet)
+    (if (== b4_alive 1)
+      (block
+        (let dx04 (- b0_x b4_x)) (let dy04 (- b0_y b4_y))
+        (let r04 (sqrt (+ (* dx04 dx04) (* dy04 dy04))))
+        (let f04 (call computeGravForce b0_m b4_m dx04 dy04 G))
+        (let ax4 (* (/ f04 b4_m) (/ dx04 (+ r04 0.01))))
+        (let ay4 (* (/ f04 b4_m) (/ dy04 (+ r04 0.01))))
+        (set! b4_vx (+ b4_vx (* ax4 dt)))
+        (set! b4_vy (+ b4_vy (* ay4 dt)))
+        (set! b4_x (+ b4_x (* b4_vx dt)))
+        (set! b4_y (+ b4_y (* b4_vy dt))))
+      0)
+
+    # -------------------------------------------------------------------------
+    # Check Inelastic Collision Coalescence
+    # -------------------------------------------------------------------------
+    # Comet hits Planet (distance < 10)
+    (if (and (== b1_alive 1) (== b4_alive 1))
+      (block
+        (let dist_x (- b1_x b4_x))
+        (let dist_y (- b1_y b4_y))
+        (let dist_sq (+ (* dist_x dist_x) (* dist_y dist_y)))
+        (if (< dist_sq 100.0)
+          (block
+            (set! b1_vx (call coalesceMomentum b1_m b1_vx b4_m b4_vx))
+            (set! b1_vy (call coalesceMomentum b1_m b1_vy b4_m b4_vy))
+            (set! b1_m (+ b1_m b4_m))
+            (set! b4_alive 0)
+            (set! total_coalescences (+ total_coalescences 1))
+            (call audio.sfx_beep 180.0 0.15))
+          0))
+      0)
+
+    # Probe hits Central Star (r < 18)
+    (if (== b3_alive 1)
+      (block
+        (let pr_x (- b0_x b3_x))
+        (let pr_y (- b0_y b3_y))
+        (if (< (+ (* pr_x pr_x) (* pr_y pr_y)) 324.0)
+          (block
+            (set! b3_alive 0)
+            (set! total_coalescences (+ total_coalescences 1))
+            (call audio.sfx_beep 120.0 0.2))
+          0))
+      0)
+
+    # -------------------------------------------------------------------------
+    # RENDER SANDBOX
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 6 8 18))
+
+    # Starfield background
+    (gfxDrawPixel 80 50 (gfxRgb 180 180 240))
+    (gfxDrawPixel 460 70 (gfxRgb 200 200 255))
+    (gfxDrawPixel 100 370 (gfxRgb 220 220 255))
+    (gfxDrawPixel 490 350 (gfxRgb 180 190 220))
+
+    # Central Singularity / Star (Golden Sun with Event Horizon)
+    (gfxDrawRect (- b0_x 18) (- b0_y 18) 36 36 (gfxRgb 255 170 20) 1)
+    (gfxDrawRect (- b0_x 14) (- b0_y 14) 28 28 (gfxRgb 255 220 50) 1)
+    (gfxDrawRect (- b0_x 8) (- b0_y 8) 16 16 (gfxRgb 255 255 255) 1)
+
+    # Draw Probe Trajectory
+    (let pi 0)
+    (while (< pi (length probe_trail_x))
+      (gfxDrawPixel (floor (get probe_trail_x pi)) (floor (get probe_trail_y pi)) (gfxRgb 50 240 120))
+      (set! pi (+ pi 1)))
+
+    # Draw Body 1: Planet (Cyan)
+    (if (== b1_alive 1)
+      (block
+        (gfxDrawRect (- b1_x 7) (- b1_y 7) 14 14 (gfxRgb 50 200 255) 1)
+        (gfxDrawRect (- b1_x 3) (- b1_y 3) 6 6 (gfxRgb 255 255 255) 1))
+      0)
+
+    # Draw Body 2: Moon (Yellow/White)
+    (if (== b2_alive 1)
+      (gfxDrawRect (- b2_x 3) (- b2_y 3) 6 6 (gfxRgb 255 240 100) 1)
+      0)
+
+    # Draw Body 3: Controllable Probe (Green)
+    (if (== b3_alive 1)
+      (block
+        (gfxDrawRect (- b3_x 4) (- b3_y 4) 8 8 (gfxRgb 60 255 120) 1)
+        (gfxDrawLine b3_x b3_y (+ b3_x (* b3_vx 3.0)) (+ b3_y (* b3_vy 3.0)) (gfxRgb 255 240 50)))
+      0)
+
+    # Draw Body 4: Retrograde Comet (Magenta)
+    (if (== b4_alive 1)
+      (gfxDrawRect (- b4_x 5) (- b4_y 5) 10 10 (gfxRgb 255 60 180) 1)
+      0)
+
+    # Top Status Bar
+    (gfxDrawRect 0 0 560 30 (gfxRgb 16 18 30) 1)
+    (gfxDrawText 16 7 "GRAVITY WELL: N-BODY SANDBOX" (gfxRgb 100 230 255))
+    (gfxDrawText 280 7 (str_join (list "COALESCENCE EVENTS: " total_coalescences) "") (gfxRgb 255 220 80))
+    (if (== b3_alive 1)
+      (gfxDrawText 470 7 "PROBE: ACTIVE" (gfxRgb 60 255 120))
+      (gfxDrawText 470 7 "PROBE: LOST" (gfxRgb 255 80 90)))
+
+    # Bottom Help Bar
+    (gfxDrawRect 0 380 560 40 (gfxRgb 12 14 24) 1)
+    (gfxDrawText 16 384 "CONTROLS: Space: Launch Probe | Arrows: Steer Probe Thrusters | R: Reset Sandbox" (gfxRgb 180 195 220))
+    (gfxDrawText 16 402 "PHYSICS: N-Body Inelastic Coalescence | Momentum Conservation Conserved" (gfxRgb 140 160 190))
+
+    (gamePresent))
+
+  (call print "Gravity Well closed cleanly.")
+  (return 0))

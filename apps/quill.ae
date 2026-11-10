@@ -1,0 +1,403 @@
+# ==============================================================================
+# QUILL: Full Interactive Markdown File Editor & Live HTML Preview Studio
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func parseHeadingLevel (prefix_char count)
+  (if (== count 1.0) (return 1.0) 0)
+  (if (== count 2.0) (return 2.0) 0)
+  (return 3.0))
+
+(func computeWordCount (char_count avg_word_len)
+  (let words (/ char_count avg_word_len))
+  (return words))
+
+(func estimateReadingTime (word_count words_per_minute)
+  (let minutes (/ word_count words_per_minute))
+  (if (< minutes 1.0) (return 1.0) 0)
+  (return minutes))
+
+(func getCharForKey (key)
+  (if (== key 32) (return " ") 0)
+  (if (== key 48) (return "0") 0)
+  (if (== key 49) (return "1") 0)
+  (if (== key 50) (return "2") 0)
+  (if (== key 51) (return "3") 0)
+  (if (== key 52) (return "4") 0)
+  (if (== key 53) (return "5") 0)
+  (if (== key 54) (return "6") 0)
+  (if (== key 55) (return "7") 0)
+  (if (== key 56) (return "8") 0)
+  (if (== key 57) (return "9") 0)
+  (if (== key 65) (return "a") 0)
+  (if (== key 66) (return "b") 0)
+  (if (== key 67) (return "c") 0)
+  (if (== key 68) (return "d") 0)
+  (if (== key 69) (return "e") 0)
+  (if (== key 70) (return "f") 0)
+  (if (== key 71) (return "g") 0)
+  (if (== key 72) (return "h") 0)
+  (if (== key 73) (return "i") 0)
+  (if (== key 74) (return "j") 0)
+  (if (== key 75) (return "k") 0)
+  (if (== key 76) (return "l") 0)
+  (if (== key 77) (return "m") 0)
+  (if (== key 78) (return "n") 0)
+  (if (== key 79) (return "o") 0)
+  (if (== key 80) (return "p") 0)
+  (if (== key 81) (return "q") 0)
+  (if (== key 82) (return "r") 0)
+  (if (== key 83) (return "s") 0)
+  (if (== key 84) (return "t") 0)
+  (if (== key 85) (return "u") 0)
+  (if (== key 86) (return "v") 0)
+  (if (== key 87) (return "w") 0)
+  (if (== key 88) (return "x") 0)
+  (if (== key 89) (return "y") 0)
+  (if (== key 90) (return "z") 0)
+  (if (== key 189) (return "-") 0)
+  (if (== key 190) (return ".") 0)
+  (return ""))
+
+(func selfCheck ()
+  (call print "=== Self Check: Quill ===")
+  # Test heading parsing
+  (let h1 (call parseHeadingLevel 35.0 1.0))
+  (if (!= h1 1.0) (return 0) 0)
+
+  # Test word count approximation: 50 chars / 5 chars_per_word = 10 words
+  (let wc (call computeWordCount 50.0 5.0))
+  (if (!= wc 10.0) (return 0) 0)
+
+  # Test string slicing backspace simulation: "hello" sliced [0..4] -> "hell"
+  (let s "hello")
+  (let truncated (slice s 0 4))
+  (if (!= truncated "hell") (return 0) 0)
+
+  (call print "[Self-Check] Markdown tokens & document metrics verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       QUILL: INTERACTIVE MARKDOWN FILE EDITOR STUDIO    ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  # 640x440 Editor Window
+  (let ok (gfxInit 640 440 "Quill: Markdown File Editor" backend 1))
+  (call print "Quill Editor initialized. Up/Down: Select Line, Typing: Edit, 5: Save, ESC: Exit.")
+
+  # Document Lines (interactive text buffer)
+  (let lines (list
+    "# Aether Architecture"
+    "A fast native programming language."
+    "## Core Features"
+    "- Zero cost tensor operations"
+    "- High speed JIT and native compiler"
+    "- Builtin 2D and 3D audio mixer"
+    "> The best code is the code never written."
+    "### Benchmark Telemetry"
+    "SIMD tensor dot-product executed in 0.4ms."
+    "Compiled with native machine code."
+  ))
+
+  (let cur_line_idx 0)
+  (let save_status "[EDITING]")
+  (let save_timer 0)
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # Headless test completes in 30 frames
+    (if (and (== headless 1) (> frame 30))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # -------------------------------------------------------------------------
+    # Editor Navigation & Input Handling
+    # -------------------------------------------------------------------------
+    # Line navigation (Up/Down)
+    (if (gameIsKeyPressed 38) # Up
+      (if (> cur_line_idx 0) (set! cur_line_idx (- cur_line_idx 1)) 0) 0)
+    (if (gameIsKeyPressed 40) # Down
+      (if (< cur_line_idx (- (length lines) 1)) (set! cur_line_idx (+ cur_line_idx 1)) 0) 0)
+
+    # Mouse Click Selection on Left Editor Pane (x: 10..310, y: 70..390)
+    (let mx (gameMouseX))
+    (let my (gameMouseY))
+    (let clicked (gameIsMousePressed 0))
+
+    (if (and clicked (and (>= mx 10) (and (< mx 310) (and (>= my 70) (< my 390)))))
+      (block
+        (let clicked_idx (floor (/ (- my 70) 20)))
+        (if (and (>= clicked_idx 0) (< clicked_idx (length lines)))
+          (set! cur_line_idx clicked_idx)
+          0))
+      0)
+
+    # Toolbar Clicks (y: 36..56)
+    (if (and clicked (and (>= my 36) (< my 56)))
+      (block
+        # Button 1: [# H1] at x=10..55
+        (if (and (>= mx 10) (< mx 55))
+          (block
+            (let cur (get lines cur_line_idx))
+            (set_at lines cur_line_idx (str_join (list "# " cur) ""))
+            (set! save_status "[EDITING]"))
+          0)
+        # Button 2: [## H2] at x=60..110
+        (if (and (>= mx 60) (< mx 110))
+          (block
+            (let cur (get lines cur_line_idx))
+            (set_at lines cur_line_idx (str_join (list "## " cur) ""))
+            (set! save_status "[EDITING]"))
+          0)
+        # Button 3: [- List] at x=115..170
+        (if (and (>= mx 115) (< mx 170))
+          (block
+            (let cur (get lines cur_line_idx))
+            (set_at lines cur_line_idx (str_join (list "- " cur) ""))
+            (set! save_status "[EDITING]"))
+          0)
+        # Button 4: [> Quote] at x=175..235
+        (if (and (>= mx 175) (< mx 235))
+          (block
+            (let cur (get lines cur_line_idx))
+            (set_at lines cur_line_idx (str_join (list "> " cur) ""))
+            (set! save_status "[EDITING]"))
+          0)
+        # Button 5: [SAVE] at x=240..305
+        (if (and (>= mx 240) (< mx 305))
+          (block
+            (let full_md (str_join lines "\n"))
+            (call file.write_str "quill_notes.md" full_md)
+            (call file.write_str "quill_doc.html" (str_join (list "<html><body><pre>" full_md "</pre></body></html>") ""))
+            (set! save_status "[SAVED TO DISK]")
+            (set! save_timer 60)
+            (call audio.sfx_beep 880.0 0.1))
+          0))
+      0)
+
+    # Hotkey Quick Formatting
+    (if (gameIsKeyPressed 49) # 1: Prepend H1
+      (block
+        (let cur (get lines cur_line_idx))
+        (set_at lines cur_line_idx (str_join (list "# " cur) ""))
+        (set! save_status "[EDITING]"))
+      0)
+    (if (gameIsKeyPressed 50) # 2: Prepend H2
+      (block
+        (let cur (get lines cur_line_idx))
+        (set_at lines cur_line_idx (str_join (list "## " cur) ""))
+        (set! save_status "[EDITING]"))
+      0)
+    (if (gameIsKeyPressed 51) # 3: Prepend List
+      (block
+        (let cur (get lines cur_line_idx))
+        (set_at lines cur_line_idx (str_join (list "- " cur) ""))
+        (set! save_status "[EDITING]"))
+      0)
+    (if (gameIsKeyPressed 52) # 4: Prepend Quote
+      (block
+        (let cur (get lines cur_line_idx))
+        (set_at lines cur_line_idx (str_join (list "> " cur) ""))
+        (set! save_status "[EDITING]"))
+      0)
+    (if (gameIsKeyPressed 53) # 5: Save File
+      (block
+        (let full_md (str_join lines "\n"))
+        (call file.write_str "quill_notes.md" full_md)
+        (call file.write_str "quill_doc.html" (str_join (list "<html><body><pre>" full_md "</pre></body></html>") ""))
+        (set! save_status "[SAVED TO DISK]")
+        (set! save_timer 60)
+        (call audio.sfx_beep 880.0 0.1))
+      0)
+
+    # Enter (13): Insert new line
+    (if (gameIsKeyPressed 13)
+      (block
+        (let new_lines (list))
+        (let li 0)
+        (while (< li (length lines))
+          (append new_lines (get lines li))
+          (if (== li cur_line_idx)
+            (append new_lines "")
+            0)
+          (set! li (+ li 1)))
+        (set! lines new_lines)
+        (set! cur_line_idx (+ cur_line_idx 1))
+        (set! save_status "[EDITING]"))
+      0)
+
+    # Backspace (8): Delete last character from current line
+    (if (gameIsKeyPressed 8)
+      (block
+        (let cur_text (get lines cur_line_idx))
+        (let cur_len (length cur_text))
+        (if (> cur_len 0)
+          (block
+            (let sliced (slice cur_text 0 (- cur_len 1)))
+            (set_at lines cur_line_idx sliced)
+            (set! save_status "[EDITING]"))
+          0))
+      0)
+
+    # Delete (46): Clear current line
+    (if (gameIsKeyPressed 46)
+      (block
+        (set_at lines cur_line_idx "")
+        (set! save_status "[EDITING]"))
+      0)
+
+    # Typing Input: scan keys A..Z, 0..9, Space, etc.
+    (let ki 32)
+    (while (<= ki 90)
+      (if (gameIsKeyPressed ki)
+        (block
+          (let ch (call getCharForKey ki))
+          (if (> (length ch) 0)
+            (block
+              (let cur_text (get lines cur_line_idx))
+              (set_at lines cur_line_idx (str_join (list cur_text ch) ""))
+              (set! save_status "[EDITING]"))
+            0))
+        0)
+      (set! ki (+ ki 1)))
+
+    # Compute live metrics
+    (let total_chars 0)
+    (let mi 0)
+    (while (< mi (length lines))
+      (set! total_chars (+ total_chars (length (get lines mi))))
+      (set! mi (+ mi 1)))
+    (let total_words (floor (call computeWordCount total_chars 5.0)))
+
+    # Save timer countdown
+    (if (> save_timer 0) (set! save_timer (- save_timer 1)) 0)
+
+    # -------------------------------------------------------------------------
+    # RENDER INTERFACE (Dual-Pane Markdown Studio)
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 16 18 28))
+
+    # Top Header Bar
+    (gfxDrawRect 0 0 640 32 (gfxRgb 24 28 42) 1)
+    (gfxDrawText 14 8 "QUILL: MARKDOWN STUDIO" (gfxRgb 100 230 255))
+    (gfxDrawText 210 8 (str_join (list "FILE: quill_notes.md | " (length lines) " LINES | " total_words " WORDS") "") (gfxRgb 180 195 220))
+    (if (> save_timer 0)
+      (gfxDrawText 520 8 save_status (gfxRgb 60 255 120))
+      (gfxDrawText 520 8 save_status (gfxRgb 255 220 80)))
+
+    # Toolbar Buttons (Left Pane top)
+    (gfxDrawRect 10 36 45 20 (gfxRgb 35 40 60) 1)
+    (gfxDrawText 14 40 "# H1" (gfxRgb 80 220 255))
+
+    (gfxDrawRect 60 36 50 20 (gfxRgb 35 40 60) 1)
+    (gfxDrawText 64 40 "## H2" (gfxRgb 160 140 255))
+
+    (gfxDrawRect 115 36 55 20 (gfxRgb 35 40 60) 1)
+    (gfxDrawText 119 40 "- List" (gfxRgb 80 255 140))
+
+    (gfxDrawRect 175 36 60 20 (gfxRgb 35 40 60) 1)
+    (gfxDrawText 179 40 "> Quote" (gfxRgb 255 220 80))
+
+    (gfxDrawRect 240 36 65 20 (gfxRgb 30 65 50) 1)
+    (gfxDrawText 244 40 "SAVE (5)" (gfxRgb 60 255 140))
+
+    # Pane Dividers & Titles
+    (gfxDrawRect 10 62 300 340 (gfxRgb 20 24 36) 1)
+    (gfxDrawRect 10 62 300 340 (gfxRgb 45 55 80) 0)
+    (gfxDrawText 14 66 "EDITOR (SOURCE)" (gfxRgb 140 160 190))
+
+    (gfxDrawRect 320 62 310 340 (gfxRgb 20 24 36) 1)
+    (gfxDrawRect 320 62 310 340 (gfxRgb 45 55 80) 0)
+    (gfxDrawText 326 66 "LIVE RENDERED PREVIEW" (gfxRgb 140 160 190))
+
+    # Render Left Pane (Editor Source Lines)
+    (let li 0)
+    (while (< li (length lines))
+      (let line_y (+ 86 (* li 20)))
+      (if (== li cur_line_idx)
+        # Active editing line highlight
+        (block
+          (gfxDrawRect 12 line_y 296 18 (gfxRgb 32 40 65) 1)
+          (gfxDrawText 16 (+ line_y 2) (str_join (list (+ li 1) ">") "") (gfxRgb 255 220 80))
+          (gfxDrawText 40 (+ line_y 2) (str_join (list (get lines li) "|") "") (gfxRgb 255 255 255)))
+        # Inactive lines
+        (block
+          (gfxDrawText 16 (+ line_y 2) (str_join (list (+ li 1) " ") "") (gfxRgb 80 90 115))
+          (gfxDrawText 40 (+ line_y 2) (get lines li) (gfxRgb 190 200 220))))
+      (set! li (+ li 1)))
+
+    # Render Right Pane (Live Markdown Parsing)
+    (let ri 0)
+    (while (< ri (length lines))
+      (let r_line (get lines ri))
+      (let r_y (+ 86 (* ri 20)))
+
+      (if (str.contains r_line "# ")
+        # Heading 1 (Cyan)
+        (block
+          (gfxDrawRect 326 r_y 298 18 (gfxRgb 25 45 65) 1)
+          (gfxDrawText 330 (+ r_y 2) r_line (gfxRgb 60 230 255)))
+        (if (str.contains r_line "## ")
+          # Heading 2 (Purple)
+          (block
+            (gfxDrawRect 326 r_y 298 18 (gfxRgb 35 30 60) 1)
+            (gfxDrawText 330 (+ r_y 2) r_line (gfxRgb 180 140 255)))
+          (if (str.contains r_line "- ")
+            # Bullet list (Green)
+            (block
+              (gfxDrawRect 330 (+ r_y 6) 5 5 (gfxRgb 80 255 140) 1)
+              (gfxDrawText 342 (+ r_y 2) r_line (gfxRgb 220 240 230)))
+            (if (str.contains r_line "> ")
+              # Blockquote (Yellow with accent bar)
+              (block
+                (gfxDrawRect 326 r_y 4 18 (gfxRgb 255 210 50) 1)
+                (gfxDrawText 336 (+ r_y 2) r_line (gfxRgb 255 230 100)))
+              # Regular text (Light Gray)
+              (gfxDrawText 330 (+ r_y 2) r_line (gfxRgb 210 220 235))))))
+      (set! ri (+ ri 1)))
+
+    # Bottom Footer Legend
+    (gfxDrawRect 0 410 640 30 (gfxRgb 14 16 26) 1)
+    (gfxDrawText 14 416 "KEYS: Up/Down: Navigate | Type: Edit | Enter: New Line | Backspace: Delete | 5: Save | ESC: Exit" (gfxRgb 150 165 190))
+
+    (gamePresent))
+
+  # On clean exit, compile and write final documents to disk
+  (let full_md (str_join lines "\n"))
+  (call file.write_str "quill_notes.md" full_md)
+  (call file.write_str "quill_doc.html" (str_join (list "<!DOCTYPE html><html><head><title>Quill Document</title></head><body><pre>" full_md "</pre></body></html>") ""))
+  (call print "Quill Editor closed. Document saved to quill_notes.md and quill_doc.html.")
+  (return 0))

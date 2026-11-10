@@ -1,0 +1,335 @@
+# ==============================================================================
+# PIXEL FORGE: 2D Sprite Animator & Tilemap Canvas Studio
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func blendOnionSkin (current_rgb prev_rgb alpha)
+  # Linear color blending: out = current * (1 - alpha) + prev * alpha
+  (let blended (+ (* current_rgb (- 1.0 alpha)) (* prev_rgb alpha)))
+  (return blended))
+
+(func isPixelInBounds (x y width height)
+  (if (and (>= x 0.0) (< x width))
+    (if (and (>= y 0.0) (< y height))
+      (return 1.0)
+      (return 0.0))
+    (return 0.0)))
+
+(func selfCheck ()
+  (call print "=== Self Check: Pixel Forge ===")
+  # Test color blend at 50% alpha
+  (let b (call blendOnionSkin 100.0 200.0 0.5))
+  (if (!= b 150.0) (return 0) 0)
+
+  # Test boundary checks
+  (let in_bounds (call isPixelInBounds 8.0 8.0 16.0 16.0))
+  (if (!= in_bounds 1.0) (return 0) 0)
+
+  (let out_bounds (call isPixelInBounds 16.0 8.0 16.0 16.0))
+  (if (!= out_bounds 0.0) (return 0) 0)
+
+  (call print "[Self-Check] Onion-skinning math & canvas bounds verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       PIXEL FORGE: 2D SPRITE ANIMATOR & CANVAS STUDIO   ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  # Window dimensions: 540x420
+  (let ok (gfxInit 540 420 "Pixel Forge: Sprite Studio" backend 1))
+  (call print "Pixel Forge initialized. WASD/Arrows to move cursor, Space/Click to draw, O: Onion Skin, A: Animate, ESC: Exit.")
+
+  # 16x16 Canvas Frames (4 frames of 256 pixels each)
+  # 0: Blank/White (16777215)
+  (let frame0 (list))
+  (let frame1 (list))
+  (let frame2 (list))
+  (let frame3 (list))
+  (let pi 0)
+  (while (< pi 256)
+    (append frame0 16777215)
+    (append frame1 16777215)
+    (append frame2 16777215)
+    (append frame3 16777215)
+    (set! pi (+ pi 1)))
+
+  # Pre-seed frame 0 with a cute retro 8-bit character
+  # Head at (6,4)..(9,7)
+  (let h_row 4)
+  (while (<= h_row 7)
+    (let h_col 6)
+    (while (<= h_col 9)
+      (set_at frame0 (+ (* h_row 16) h_col) 16724530) # Red hat/hair
+      (set! h_col (+ h_col 1)))
+    (set! h_row (+ h_row 1)))
+  # Face at (6,8)..(9,10)
+  (let f_row 8)
+  (while (<= f_row 10)
+    (let f_col 6)
+    (while (<= f_col 9)
+      (set_at frame0 (+ (* f_row 16) f_col) 16766370) # Peach skin
+      (set! f_col (+ f_col 1)))
+    (set! f_row (+ f_row 1)))
+  # Eyes
+  (set_at frame0 (+ (* 8 16) 7) 0)
+  (set_at frame0 (+ (* 8 16) 9) 0)
+
+  # Frame 1: character stepping
+  (let cpy_i 0)
+  (while (< cpy_i 256)
+    (set_at frame1 cpy_i (get frame0 cpy_i))
+    (set! cpy_i (+ cpy_i 1)))
+  (set_at frame1 (+ (* 12 16) 5) 255) # Blue foot step left
+  (set_at frame1 (+ (* 12 16) 10) 255)
+
+  # Palette (8 colors)
+  # 0: Black, 1: White, 2: Red, 3: Orange, 4: Yellow, 5: Green, 6: Cyan, 7: Blue
+  (let palette (list 0 16777215 16724530 16744448 16773410 34650 65535 255))
+  (let active_color_idx 2) # Red default
+  (let active_color 16724530)
+
+  # Editor State
+  (let cur_x 8)
+  (let cur_y 8)
+  (let current_frame 0)
+  (let onion_skin 1)
+  (let is_playing_anim 0)
+  (let anim_timer 0)
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # Headless test completes after 40 frames
+    (if (and (== headless 1) (> frame 40))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # Keyboard Tool Controls
+    # Arrow keys / WASD cursor movement
+    (if (or (gameIsKeyPressed 37) (gameIsKeyPressed 65)) # Left / A
+      (if (> cur_x 0) (set! cur_x (- cur_x 1)) 0) 0)
+    (if (or (gameIsKeyPressed 39) (gameIsKeyPressed 68)) # Right / D
+      (if (< cur_x 15) (set! cur_x (+ cur_x 1)) 0) 0)
+    (if (or (gameIsKeyPressed 38) (gameIsKeyPressed 87)) # Up / W
+      (if (> cur_y 0) (set! cur_y (- cur_y 1)) 0) 0)
+    (if (or (gameIsKeyPressed 40) (gameIsKeyPressed 83)) # Down / S
+      (if (< cur_y 15) (set! cur_y (+ cur_y 1)) 0) 0)
+
+    # Palette selection (Number keys 1..8)
+    (if (gameIsKeyPressed 49) (do (set! active_color_idx 0) (set! active_color (get palette 0))) 0)
+    (if (gameIsKeyPressed 50) (do (set! active_color_idx 1) (set! active_color (get palette 1))) 0)
+    (if (gameIsKeyPressed 51) (do (set! active_color_idx 2) (set! active_color (get palette 2))) 0)
+    (if (gameIsKeyPressed 52) (do (set! active_color_idx 3) (set! active_color (get palette 3))) 0)
+    (if (gameIsKeyPressed 53) (do (set! active_color_idx 4) (set! active_color (get palette 4))) 0)
+    (if (gameIsKeyPressed 54) (do (set! active_color_idx 5) (set! active_color (get palette 5))) 0)
+    (if (gameIsKeyPressed 55) (do (set! active_color_idx 6) (set! active_color (get palette 6))) 0)
+    (if (gameIsKeyPressed 56) (do (set! active_color_idx 7) (set! active_color (get palette 7))) 0)
+
+    # Frame switching ('<' / ',' = 188, '>' / '.' = 190, or Left/Right bracket)
+    (if (or (gameIsKeyPressed 188) (gameIsKeyPressed 219)) # Prev frame
+      (if (> current_frame 0) (set! current_frame (- current_frame 1)) 0) 0)
+    (if (or (gameIsKeyPressed 190) (gameIsKeyPressed 221)) # Next frame
+      (if (< current_frame 3) (set! current_frame (+ current_frame 1)) 0) 0)
+
+    # Onion Skin Toggle (Key 'O' = 79)
+    (if (gameIsKeyPressed 79)
+      (if (== onion_skin 1) (set! onion_skin 0) (set! onion_skin 1))
+      0)
+
+    # Animation Play Toggle (Key 'A' = 65) - wait, key 'A' is used for left; let's use Space or 'M' for anim play (Key 'M' = 77 or 'T' = 84)
+    (if (gameIsKeyPressed 84)
+      (if (== is_playing_anim 1) (set! is_playing_anim 0) (set! is_playing_anim 1))
+      0)
+
+    # Clear Canvas (Key 'C' = 67)
+    (if (gameIsKeyPressed 67)
+      (block
+        (let ci 0)
+        (while (< ci 256)
+          (if (== current_frame 0) (set_at frame0 ci 16777215) 0)
+          (if (== current_frame 1) (set_at frame1 ci 16777215) 0)
+          (if (== current_frame 2) (set_at frame2 ci 16777215) 0)
+          (if (== current_frame 3) (set_at frame3 ci 16777215) 0)
+          (set! ci (+ ci 1))))
+      0)
+
+    # Mouse Click / Drag on Canvas
+    # Canvas area on screen: offset x=24, y=40, size 16x16 with 18px cells -> 288x288 px
+    (let mx (gameMouseX))
+    (let my (gameMouseY))
+    (let mouse_down (gameIsMouseDown 0))
+    (let key_draw (gameIsKeyDown 32)) # Space to stamp pixel
+
+    (if (and (>= mx 24) (and (< mx 312) (and (>= my 40) (< my 328))))
+      (block
+        (let hx (/ (- mx 24) 18))
+        (let hy (/ (- my 40) 18))
+        (set! cur_x (floor hx))
+        (set! cur_y (floor hy)))
+      0)
+
+    # Paint pixel at cursor if mouse down or Space pressed
+    (if (or mouse_down key_draw)
+      (block
+        (let p_idx (+ (* cur_y 16) cur_x))
+        (if (== current_frame 0) (set_at frame0 p_idx active_color) 0)
+        (if (== current_frame 1) (set_at frame1 p_idx active_color) 0)
+        (if (== current_frame 2) (set_at frame2 p_idx active_color) 0)
+        (if (== current_frame 3) (set_at frame3 p_idx active_color) 0))
+      0)
+
+    # Animation auto-cycle if playing
+    (if (== is_playing_anim 1)
+      (block
+        (set! anim_timer (+ anim_timer 1))
+        (if (== (% anim_timer 12) 0)
+          (set! current_frame (% (+ current_frame 1) 4))
+          0))
+      0)
+
+    # -------------------------------------------------------------------------
+    # RENDER INTERFACE
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 20 22 34))
+
+    # Top Header
+    (gfxDrawRect 0 0 540 28 (gfxRgb 28 32 48) 1)
+    (gfxDrawText 16 7 "PIXEL FORGE: SPRITE ANIMATOR" (gfxRgb 100 230 255))
+    (gfxDrawText 300 7 (str_join (list "FRAME: " (+ current_frame 1) "/4") "") (gfxRgb 255 230 80))
+    (if (== onion_skin 1)
+      (gfxDrawText 420 7 "ONION: ON" (gfxRgb 60 250 140))
+      (gfxDrawText 420 7 "ONION: OFF" (gfxRgb 180 190 210)))
+
+    # Draw Canvas Background Grid
+    (let gy 0)
+    (while (< gy 16)
+      (let gx 0)
+      (while (< gx 16)
+        (let cx (+ 24 (* gx 18)))
+        (let cy (+ 40 (* gy 18)))
+        (let pidx (+ (* gy 16) gx))
+        (let pcol 16777215)
+        (if (== current_frame 0) (set! pcol (get frame0 pidx)) 0)
+        (if (== current_frame 1) (set! pcol (get frame1 pidx)) 0)
+        (if (== current_frame 2) (set! pcol (get frame2 pidx)) 0)
+        (if (== current_frame 3) (set! pcol (get frame3 pidx)) 0)
+
+        # Check Onion Skin from previous frame
+        (if (and (== onion_skin 1) (and (> current_frame 0) (== pcol 16777215)))
+          (block
+            (let prev_col 16777215)
+            (if (== current_frame 1) (set! prev_col (get frame0 pidx)) 0)
+            (if (== current_frame 2) (set! prev_col (get frame1 pidx)) 0)
+            (if (== current_frame 3) (set! prev_col (get frame2 pidx)) 0)
+            (if (!= prev_col 16777215)
+              (set! pcol (call blendOnionSkin 16777215.0 prev_col 0.4))
+              0))
+          0)
+
+        (gfxDrawRect cx cy 17 17 pcol 1)
+        (set! gx (+ gx 1)))
+      (set! gy (+ gy 1)))
+
+    # Canvas Outline
+    (gfxDrawRect 23 39 290 290 (gfxRgb 60 70 100) 0)
+
+    # Draw Active Cursor [ ]
+    (let cur_scr_x (+ 24 (* cur_x 18)))
+    (let cur_scr_y (+ 40 (* cur_y 18)))
+    (gfxDrawRect cur_scr_x cur_scr_y 17 17 (gfxRgb 255 240 50) 0)
+
+    # Right Tool Panel
+    (gfxDrawRect 330 40 190 288 (gfxRgb 26 30 46) 1)
+    (gfxDrawRect 330 40 190 288 (gfxRgb 45 55 80) 0)
+    (gfxDrawText 342 50 "PREVIEW (1X & 2X)" (gfxRgb 140 160 195))
+
+    # 1x Mini Preview Box (16x16)
+    (let mpy 0)
+    (while (< mpy 16)
+      (let mpx 0)
+      (while (< mpx 16)
+        (let idx (+ (* mpy 16) mpx))
+        (let c 16777215)
+        (if (== current_frame 0) (set! c (get frame0 idx)) 0)
+        (if (== current_frame 1) (set! c (get frame1 idx)) 0)
+        (if (== current_frame 2) (set! c (get frame2 idx)) 0)
+        (if (== current_frame 3) (set! c (get frame3 idx)) 0)
+        (gfxDrawPixel (+ 342 mpx) (+ 70 mpy) c)
+        (set! mpx (+ mpx 1)))
+      (set! mpy (+ mpy 1)))
+
+    # 2x Mini Preview Box (32x32)
+    (let mpy2 0)
+    (while (< mpy2 16)
+      (let mpx2 0)
+      (while (< mpx2 16)
+        (let idx2 (+ (* mpy2 16) mpx2))
+        (let c2 16777215)
+        (if (== current_frame 0) (set! c2 (get frame0 idx2)) 0)
+        (if (== current_frame 1) (set! c2 (get frame1 idx2)) 0)
+        (if (== current_frame 2) (set! c2 (get frame2 idx2)) 0)
+        (if (== current_frame 3) (set! c2 (get frame3 idx2)) 0)
+        (gfxDrawRect (+ 380 (* mpx2 2)) (+ 70 (* mpy2 2)) 2 2 c2 1)
+        (set! mpx2 (+ mpx2 1)))
+      (set! mpy2 (+ mpy2 1)))
+
+    # Instruction Legend
+    (gfxDrawText 342 120 "CONTROLS:" (gfxRgb 255 220 80))
+    (gfxDrawText 342 138 "Click/Space: Paint" (gfxRgb 180 195 220))
+    (gfxDrawText 342 154 "WASD: Move Cursor" (gfxRgb 180 195 220))
+    (gfxDrawText 342 170 "1..8: Select Color" (gfxRgb 180 195 220))
+    (gfxDrawText 342 186 "< / >: Change Frame" (gfxRgb 180 195 220))
+    (gfxDrawText 342 202 "O: Toggle Onion Skin" (gfxRgb 180 195 220))
+    (gfxDrawText 342 218 "T: Animate Loop" (gfxRgb 180 195 220))
+    (gfxDrawText 342 234 "C: Clear Frame" (gfxRgb 180 195 220))
+    (gfxDrawText 342 250 "ESC: Exit Studio" (gfxRgb 180 195 220))
+
+    # Bottom Color Palette Swatches
+    (gfxDrawRect 0 340 540 80 (gfxRgb 24 28 42) 1)
+    (gfxDrawText 24 350 "ACTIVE PALETTE:" (gfxRgb 140 160 190))
+    (let sw 0)
+    (while (< sw 8)
+      (let sw_x (+ 24 (* sw 38)))
+      (let sw_col (get palette sw))
+      (gfxDrawRect sw_x 370 30 30 sw_col 1)
+      (if (== sw active_color_idx)
+        (gfxDrawRect (- sw_x 2) 368 34 34 (gfxRgb 255 255 255) 0)
+        (gfxDrawRect sw_x 370 30 30 (gfxRgb 60 70 95) 0))
+      (set! sw (+ sw 1)))
+
+    (gamePresent))
+
+  (call print "Pixel Forge closed cleanly.")
+  (return 0))

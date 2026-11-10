@@ -1,0 +1,86 @@
+# ==============================================================================
+# App 1: Neural Network Classifier & Loss Evaluator
+# Demonstrates: Tensors, Matrix Multiplication, Activation Functions,
+#               Automatic Differentiation, Loss Functions & INT8 Quantization.
+# ==============================================================================
+
+(func forward_layer (inputs weights bias)
+  (let z (matmul inputs weights))
+  (let activated (relu (+ z bias)))
+  (return activated))
+
+(func predict_proba (hidden final_weights)
+  (let logits (matmul hidden final_weights))
+  (let probs (sigmoid logits))
+  (return probs))
+
+(func evaluate_sample (sample_id inputs w1 b1 w2 targets)
+  (call print "--- Sample Evaluation ID:" sample_id "---")
+  (call print "Input Features:" inputs)
+  
+  # Layer 1: Dense [1x3] * [3x4] -> [1x4] with ReLU
+  (let h1 (call forward_layer inputs w1 b1))
+  (call print "Hidden Layer (ReLU):" h1)
+
+  # Layer 2: Dense [1x4] * [4x2] -> [1x2] with Sigmoid probabilities
+  (let probs (call predict_proba h1 w2))
+  (call print "Predicted Probabilities:" probs)
+  (call print "Target Ground Truth:   " targets)
+
+  # Loss calculation
+  (let loss (mse_loss probs targets))
+  (call print "Sample MSE Loss:" loss)
+  (return loss))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       AETHER AI RUNTIME: NEURAL NETWORK PIPELINE        ")
+  (call print "=========================================================")
+
+  # Model architecture: 3 Inputs -> 4 Hidden Units -> 2 Classes
+  # Weight matrix W1 [3, 4]
+  (let w1 (tensor [3 4] [
+    0.25 -0.50  0.75 -0.10
+    0.60  0.15 -0.30  0.80
+   -0.40  0.90  0.20 -0.50
+  ]))
+
+  # Bias vector B1 [1, 4]
+  (let b1 (tensor [1 4] [0.10 -0.20 0.05 0.15]))
+
+  # Weight matrix W2 [4, 2]
+  (let w2 (tensor [4 2] [
+    0.80 -0.40
+   -0.60  0.70
+    0.50  0.20
+   -0.10  0.90
+  ]))
+
+  # Sample 1: Class 0 feature profile
+  (let x1 (tensor [1 3] [1.2 0.8 -0.5]))
+  (let y1 (tensor [1 2] [1.0 0.0]))
+  (let loss1 (call evaluate_sample 1 x1 w1 b1 w2 y1))
+
+  # Sample 2: Class 1 feature profile
+  (let x2 (tensor [1 3] [-0.8 1.5 2.0]))
+  (let y2 (tensor [1 2] [0.0 1.0]))
+  (let loss2 (call evaluate_sample 2 x2 w1 b1 w2 y2))
+
+  # Test Automatic Differentiation on scalar loss component
+  (call print "---------------------------------------------------------")
+  (call print "Evaluating Analytical Gradient with Reverse-Mode AD...")
+  (let x 2.5)
+  (let f_x (* x x))
+  (let df_dx (gradient f_x x))
+  (call print "Scalar f(x) = x^2 at x = 2.5 => df/dx =" df_dx)
+
+  # Model Weight Quantization to INT8 for edge deployment
+  (call print "---------------------------------------------------------")
+  (call print "Quantizing Weight Tensor W1 to INT8 Representation...")
+  (let q_w1 (quantize w1))
+  (call print "Quantized Weights W1 (INT8):" q_w1)
+
+  (call print "=========================================================")
+  (call print "       NEURAL NETWORK PIPELINE COMPLETED SUCCESSFULLY    ")
+  (call print "=========================================================")
+  (return 0))

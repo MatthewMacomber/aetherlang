@@ -1,0 +1,220 @@
+# ==============================================================================
+# AETHER SOUND LAB: Modular DSP Synthesizer & Effects Rack
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func lowpassFilter (x prev_y cutoff_alpha)
+  # 1-pole IIR lowpass filter: y[n] = y[n-1] + alpha * (x[n] - y[n-1])
+  (let y (+ prev_y (* cutoff_alpha (- x prev_y))))
+  (return y))
+
+(func lfoModulate (base_freq depth lfo_phase)
+  # Frequency modulation via LFO
+  (let lfo_val (sin lfo_phase))
+  (let mod_freq (+ base_freq (* depth lfo_val)))
+  (return mod_freq))
+
+(func selfCheck ()
+  (call print "=== Self Check: Aether Sound Lab ===")
+  # Test lowpass filter step response
+  (let y1 (call lowpassFilter 1.0 0.0 0.5))
+  (if (!= y1 0.5) (return 0) 0)
+  (let y2 (call lowpassFilter 1.0 0.5 0.5))
+  (if (!= y2 0.75) (return 0) 0)
+
+  # Test LFO modulation at phase 0
+  (let f0 (call lfoModulate 440.0 50.0 0.0))
+  (if (!= f0 440.0) (return 0) 0)
+
+  (call print "[Self-Check] IIR lowpass filter & LFO DSP verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       AETHER SOUND LAB: MODULAR DSP SYNTHESIZER         ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  (let ok (gfxInit 560 420 "Aether Sound Lab: Modular Synthesizer" backend 1))
+  (call print "Sound Lab initialized. Keys 1..8: Play Notes, Left/Right: Cutoff, Up/Down: LFO Rate, ESC: Exit.")
+
+  # Synthesizer Module Parameters
+  (let cutoff_freq 650.0)
+  (let lfo_rate 4.0)
+  (let lfo_depth 120.0)
+  (let lfo_phase 0.0)
+  (let osc_shape 1) # 1: Sine, 2: Square, 3: Sawtooth, 4: Triangle
+  (let filter_state 0.0)
+  (let last_played_note 0.0)
+
+  # Note Scale frequencies (C4..C5)
+  # 1: C4 (261.63), 2: D4 (293.66), 3: E4 (329.63), 4: F4 (349.23)
+  # 5: G4 (392.00), 6: A4 (440.00), 7: B4 (493.88), 8: C5 (523.25)
+  (let note_freqs (list 261.63 293.66 329.63 349.23 392.00 440.00 493.88 523.25))
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # Headless test completes in 40 frames
+    (if (and (== headless 1) (> frame 40))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # Parameter Adjustments
+    # Left / Right: Adjust Cutoff Frequency
+    (if (gameIsKeyDown 37) (if (> cutoff_freq 150.0) (set! cutoff_freq (- cutoff_freq 10.0)) 0) 0)
+    (if (gameIsKeyDown 39) (if (< cutoff_freq 2000.0) (set! cutoff_freq (+ cutoff_freq 10.0)) 0) 0)
+
+    # Up / Down: Adjust LFO Rate
+    (if (gameIsKeyDown 38) (if (< lfo_rate 20.0) (set! lfo_rate (+ lfo_rate 0.2)) 0) 0)
+    (if (gameIsKeyDown 40) (if (> lfo_rate 0.5) (set! lfo_rate (- lfo_rate 0.2)) 0) 0)
+
+    # Waveform Switching (Key 'W' = 87)
+    (if (gameIsKeyPressed 87)
+      (set! osc_shape (% (+ osc_shape 1) 4))
+      0)
+
+    # LFO Phase update
+    (set! lfo_phase (+ lfo_phase (* lfo_rate 0.05)))
+
+    # Playable Musical Keyboard Notes (Keys 1..8 = 49..56)
+    (let note_idx -1)
+    (if (gameIsKeyPressed 49) (set! note_idx 0) 0)
+    (if (gameIsKeyPressed 50) (set! note_idx 1) 0)
+    (if (gameIsKeyPressed 51) (set! note_idx 2) 0)
+    (if (gameIsKeyPressed 52) (set! note_idx 3) 0)
+    (if (gameIsKeyPressed 53) (set! note_idx 4) 0)
+    (if (gameIsKeyPressed 54) (set! note_idx 5) 0)
+    (if (gameIsKeyPressed 55) (set! note_idx 6) 0)
+    (if (gameIsKeyPressed 56) (set! note_idx 7) 0)
+
+    (if (>= note_idx 0)
+      (block
+        (let raw_freq (get note_freqs note_idx))
+        # Apply LFO modulation and filter
+        (let mod_freq (call lfoModulate raw_freq lfo_depth lfo_phase))
+        (let alpha (/ cutoff_freq 2200.0))
+        (set! filter_state (call lowpassFilter 1.0 filter_state alpha))
+        (set! last_played_note mod_freq)
+        (call audio.sfx_beep mod_freq 0.15))
+      0)
+
+    # -------------------------------------------------------------------------
+    # RENDER SYNTHESIZER RACK GUI
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 20 22 34))
+
+    # Rack Header
+    (gfxDrawRect 0 0 560 34 (gfxRgb 28 32 48) 1)
+    (gfxDrawText 16 8 "AETHER SOUND LAB: MODULAR RACK" (gfxRgb 100 230 255))
+    (gfxDrawText 380 8 (str_join (list "CUTOFF: " (floor cutoff_freq) " Hz") "") (gfxRgb 255 220 80))
+
+    # Module 1: Oscilloscope Monitor (Center Left)
+    (gfxDrawRect 20 48 320 180 (gfxRgb 12 14 22) 1)
+    (gfxDrawRect 20 48 320 180 (gfxRgb 45 55 80) 0)
+    (gfxDrawText 30 56 "OSCILLOSCOPE / SPECTRUM" (gfxRgb 140 160 190))
+
+    # Draw Oscilloscope Waveform Trace
+    (let ox 0)
+    (while (< ox 300)
+      (let wave_phase (+ (* ox 0.08) (* frame 0.1)))
+      (let s_val (sin wave_phase))
+      (if (== osc_shape 1)
+        # Square wave
+        (if (> s_val 0.0) (set! s_val 0.8) (set! s_val -0.8))
+        (if (== osc_shape 2)
+          # Sawtooth wave
+          (set! s_val (- (* (% ox 40) 0.04) 0.8))
+          0))
+      (let oy (+ 138 (floor (* s_val 45.0))))
+      (gfxDrawPixel (+ 30 ox) oy (gfxRgb 50 255 180))
+      (set! ox (+ ox 1)))
+
+    # Module 2: Parameter Sliders & Knobs (Center Right)
+    (gfxDrawRect 360 48 180 180 (gfxRgb 26 30 46) 1)
+    (gfxDrawRect 360 48 180 180 (gfxRgb 45 55 80) 0)
+    (gfxDrawText 372 56 "VCF & LFO CONTROLS" (gfxRgb 255 220 80))
+
+    # Cutoff Slider
+    (gfxDrawText 372 82 "Filter Cutoff:" (gfxRgb 180 190 215))
+    (gfxDrawRect 372 100 150 12 (gfxRgb 14 16 26) 1)
+    (let cutoff_fill (floor (* (/ cutoff_freq 2000.0) 150.0)))
+    (gfxDrawRect 372 100 cutoff_fill 12 (gfxRgb 60 220 255) 1)
+
+    # LFO Rate Slider
+    (gfxDrawText 372 126 (str_join (list "LFO Rate: " (floor lfo_rate) " Hz") "") (gfxRgb 180 190 215))
+    (gfxDrawRect 372 144 150 12 (gfxRgb 14 16 26) 1)
+    (let lfo_fill (floor (* (/ lfo_rate 20.0) 150.0)))
+    (gfxDrawRect 372 144 lfo_fill 12 (gfxRgb 255 180 60) 1)
+
+    # Waveform Indicator
+    (gfxDrawText 372 172 "VCO Waveform:" (gfxRgb 180 190 215))
+    (if (== osc_shape 0) (gfxDrawText 372 190 "[SINE WAVE]" (gfxRgb 50 255 180))
+      (if (== osc_shape 1) (gfxDrawText 372 190 "[SQUARE WAVE]" (gfxRgb 255 240 50))
+        (if (== osc_shape 2) (gfxDrawText 372 190 "[SAWTOOTH WAVE]" (gfxRgb 255 90 120))
+          (gfxDrawText 372 190 "[TRIANGLE WAVE]" (gfxRgb 180 120 255)))))
+
+    # Module 3: Virtual 8-Note Piano Keyboard (Bottom)
+    (gfxDrawRect 20 244 520 110 (gfxRgb 24 28 42) 1)
+    (gfxDrawRect 20 244 520 110 (gfxRgb 45 55 80) 0)
+    (gfxDrawText 30 252 "PLAYABLE SYNTHESIZER KEYBOARD (KEYS 1..8):" (gfxRgb 140 160 190))
+
+    # Draw 8 Piano Keys
+    (let ki 0)
+    (while (< ki 8)
+      (let kx (+ 30 (* ki 62)))
+      (let key_name (str_join (list "NOTE " (+ ki 1)) ""))
+      (let key_hz (str_join (list (floor (get note_freqs ki)) "Hz") ""))
+      (if (== ki note_idx)
+        # Pressed Key Highlight
+        (block
+          (gfxDrawRect kx 274 58 70 (gfxRgb 60 240 255) 1)
+          (gfxDrawText (+ kx 8) 285 key_name (gfxRgb 10 20 40))
+          (gfxDrawText (+ kx 8) 310 key_hz (gfxRgb 10 20 40)))
+        # Unpressed Key
+        (block
+          (gfxDrawRect kx 274 58 70 (gfxRgb 240 245 255) 1)
+          (gfxDrawRect kx 274 58 70 (gfxRgb 160 170 190) 0)
+          (gfxDrawText (+ kx 8) 285 key_name (gfxRgb 40 50 70))
+          (gfxDrawText (+ kx 8) 310 key_hz (gfxRgb 80 90 110))))
+      (set! ki (+ ki 1)))
+
+    # Status / Help Footer
+    (gfxDrawRect 0 370 560 50 (gfxRgb 16 18 28) 1)
+    (gfxDrawText 16 376 "CONTROLS: 1..8: Play Scale | Left/Right: Filter Cutoff | Up/Down: LFO Rate" (gfxRgb 180 195 220))
+    (gfxDrawText 16 396 "W: Cycle Waveform (Sine/Square/Saw) | ESC: Exit Synthesizer" (gfxRgb 255 220 80))
+
+    (gamePresent))
+
+  (call print "Aether Sound Lab closed cleanly.")
+  (return 0))

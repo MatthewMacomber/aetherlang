@@ -1,0 +1,240 @@
+# ==============================================================================
+# AETHER-8: Retro 16-Color Fantasy Console Cartridge Runtime & Game
+# Featuring "Super Meteor Dash" in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func getPaletteColor (idx)
+  # 16-color retro palette (hex 0xRRGGBB)
+  # 0: Black, 1: Dark Blue, 2: Dark Purple, 3: Dark Green, 4: Brown, 5: Dark Gray
+  # 6: Light Gray, 7: White, 8: Red, 9: Orange, 10: Yellow, 11: Green, 12: Blue
+  # 13: Indigo, 14: Pink, 15: Peach
+  (if (== idx 0) (return 0) 0)
+  (if (== idx 1) (return 1907770) 0)   # 0x1D133A Navy
+  (if (== idx 7) (return 16777215) 0)  # 0xFFFFFF White
+  (if (== idx 8) (return 16724530) 0)  # 0xFF3132 Red
+  (if (== idx 9) (return 16744448) 0)  # 0xFF8000 Orange
+  (if (== idx 10) (return 16773410) 0) # 0xFFEE22 Yellow
+  (if (== idx 11) (return 34650) 0)    # 0x00875A Green
+  (if (== idx 12) (return 19455) 0)    # 0x004BFF Blue
+  (if (== idx 14) (return 16744636) 0) # 0xFF7FAC Pink
+  (return 8421504)) # Light Gray
+
+(func computeSpriteOffset (sprite_id stride)
+  (let spr_x (% sprite_id stride))
+  (let spr_y (floor (/ sprite_id stride)))
+  (return (+ (* spr_x 8.0) (* spr_y 64.0))))
+
+(func selfCheck ()
+  (call print "=== Self Check: Aether-8 ===")
+  # Test palette lookups
+  (let c_white (call getPaletteColor 7))
+  (if (!= c_white 16777215) (return 0) 0)
+  (let c_red (call getPaletteColor 8))
+  (if (!= c_red 16724530) (return 0) 0)
+
+  # Test sprite coordinate calculation
+  (let off0 (call computeSpriteOffset 0.0 16.0))
+  (if (!= off0 0.0) (return 0) 0)
+  (let off1 (call computeSpriteOffset 1.0 16.0))
+  (if (!= off1 8.0) (return 0) 0)
+
+  (call print "[Self-Check] Palette & sprite blitter verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       AETHER-8: RETRO 16-COLOR FANTASY CONSOLE          ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  # 128x128 virtual display rendered into 384x384 (scale factor 3)
+  (let ok (gfxInit 384 384 "Aether-8: Super Meteor Dash" backend 1))
+  (call print "Cartridge: SUPER METEOR DASH v1.0 loaded.")
+  (call print "Controls: Left/Right / A-D to dodge, ESC to exit, R to restart.")
+
+  # Player state (x: 10..110 in 128x128 coordinate space, scaled by 3 -> 30..330)
+  (let px 56.0)
+  (let py 108.0)
+  (let p_speed 2.5)
+  (let shields 3)
+  (let score 0)
+  (let game_state 1) # 1 = Playing, 2 = Game Over
+
+  # Falling Meteors (4 hazards)
+  (let m_x (list 20.0 50.0 80.0 110.0))
+  (let m_y (list -10.0 -40.0 -70.0 -25.0))
+  (let m_spd (list 1.8 2.2 1.5 2.5))
+
+  # Energy Gem
+  (let gem_x 64.0)
+  (let gem_y -20.0)
+  (let gem_spd 1.2)
+
+  # Startup jingle
+  (call audio.sfx_beep 261.63 0.05)
+  (call audio.sfx_beep 329.63 0.05)
+  (call audio.sfx_beep 523.25 0.10)
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # Headless test completes in 40 frames
+    (if (and (== headless 1) (> frame 40))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # R restarts
+    (if (gameIsKeyPressed 82)
+      (block
+        (set! px 56.0)
+        (set! shields 3)
+        (set! score 0)
+        (set! game_state 1)
+        (set_at m_y 0 -10.0)
+        (set_at m_y 1 -40.0)
+        (set_at m_y 2 -70.0)
+        (set_at m_y 3 -25.0)
+        (set! gem_y -20.0)))
+
+    # Player movement
+    (if (== game_state 1)
+      (block
+        (if (or (gameIsKeyDown 37) (gameIsKeyDown 65)) # Left / A
+          (set! px (- px p_speed)) 0)
+        (if (or (gameIsKeyDown 39) (gameIsKeyDown 68)) # Right / D
+          (set! px (+ px p_speed)) 0)
+        (if (< px 8.0) (set! px 8.0) 0)
+        (if (> px 112.0) (set! px 112.0) 0)
+
+        # Update Meteors
+        (let mi 0)
+        (while (< mi 4)
+          (let cur_y (get m_y mi))
+          (let next_y (+ cur_y (get m_spd mi)))
+          (if (> next_y 130.0)
+            (block
+              (set! next_y -10.0)
+              (set! score (+ score 10))
+              (set_at m_x mi (% (+ (* frame 17) (* mi 29)) 100)))
+            0)
+          (set_at m_y mi next_y)
+
+          # Check collision with player (8x8 box)
+          (let meteor_x (get m_x mi))
+          (if (and (< (call math.abs (- px meteor_x)) 7.0) (< (call math.abs (- py next_y)) 7.0))
+            (block
+              (set! shields (- shields 1))
+              (set_at m_y mi -20.0)
+              (call audio.sfx_beep 140.0 0.12)
+              (if (<= shields 0)
+                (set! game_state 2)
+                0))
+            0)
+          (set! mi (+ mi 1)))
+
+        # Update Gem
+        (set! gem_y (+ gem_y gem_spd))
+        (if (> gem_y 130.0)
+          (block
+            (set! gem_y -20.0)
+            (set! gem_x (% (+ (* frame 23) 13) 100)))
+          0)
+
+        # Catch gem
+        (if (and (< (call math.abs (- px gem_x)) 8.0) (< (call math.abs (- py gem_y)) 8.0))
+          (block
+            (set! score (+ score 50))
+            (set! gem_y -20.0)
+            (set! gem_x (% (+ (* frame 31) 27) 100))
+            (call audio.sfx_beep 784.0 0.08))
+          0)))
+
+    # -------------------------------------------------------------------------
+    # RENDER FRAME (Scale 3x: 128 virtual units -> 384 screen pixels)
+    # -------------------------------------------------------------------------
+    (gfxClear (call getPaletteColor 1)) # Dark Navy background
+
+    # Virtual starfield
+    (gfxDrawPixel 45 60 (call getPaletteColor 7))
+    (gfxDrawPixel 180 90 (call getPaletteColor 7))
+    (gfxDrawPixel 300 45 (call getPaletteColor 7))
+    (gfxDrawPixel 90 240 (call getPaletteColor 7))
+    (gfxDrawPixel 240 210 (call getPaletteColor 7))
+    (gfxDrawPixel 340 300 (call getPaletteColor 7))
+
+    # Draw Gem (Bright Yellow diamond)
+    (let gx_screen (* gem_x 3))
+    (let gy_screen (* gem_y 3))
+    (gfxDrawRect gx_screen gy_screen 15 15 (call getPaletteColor 10) 1)
+    (gfxDrawRect (+ gx_screen 3) (+ gy_screen 3) 9 9 (call getPaletteColor 7) 1)
+
+    # Draw Meteors (Red / Orange flaming asteroids)
+    (let di 0)
+    (while (< di 4)
+      (let mx_screen (* (get m_x di) 3))
+      (let my_screen (* (get m_y di) 3))
+      # Core
+      (gfxDrawRect mx_screen my_screen 21 21 (call getPaletteColor 8) 1)
+      # Highlight
+      (gfxDrawRect (+ mx_screen 3) (+ my_screen 3) 12 12 (call getPaletteColor 9) 1)
+      (set! di (+ di 1)))
+
+    # Draw Player Spacecraft (Cyan / White 8x8 scaled to 24x24)
+    (if (> shields 0)
+      (block
+        (let px_screen (* px 3))
+        (let py_screen (* py 3))
+        # Wings
+        (gfxDrawRect px_screen py_screen 24 15 (call getPaletteColor 12) 1)
+        # Cockpit
+        (gfxDrawRect (+ px_screen 6) (- py_screen 9) 12 18 (call getPaletteColor 7) 1)
+        # Thruster flame
+        (gfxDrawRect (+ px_screen 9) (+ py_screen 15) 6 6 (call getPaletteColor 9) 1)))
+
+    # HUD Banner
+    (gfxDrawRect 0 0 384 24 (call getPaletteColor 0) 1)
+    (gfxDrawText 12 6 (str_join (list "SCORE: " score) "") (call getPaletteColor 10))
+    (gfxDrawText 250 6 (str_join (list "SHIELDS: " shields) "") (call getPaletteColor 11))
+
+    # Game Over
+    (if (== game_state 2)
+      (block
+        (gfxDrawRect 72 144 240 80 (call getPaletteColor 0) 1)
+        (gfxDrawRect 72 144 240 80 (call getPaletteColor 8) 0)
+        (gfxDrawText 138 164 "CRASHED!" (call getPaletteColor 8))
+        (gfxDrawText 100 190 "PRESS 'R' TO RETRY" (call getPaletteColor 7))))
+
+    (gamePresent))
+
+  (call print "Aether-8 Fantasy Console runtime closed cleanly.")
+  (return 0))

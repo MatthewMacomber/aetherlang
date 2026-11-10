@@ -1,0 +1,282 @@
+# ==============================================================================
+# Aether Tic-Tac-Toe: Fully Interactive Desktop Game
+# Features:
+#   - Native Desktop Windowing (Win32 GDI/DIB)
+#   - 2D Color Graphics & Inset Cell Styling
+#   - Dynamic Turn Display & Win/Tie Detection
+#   - Particle Burst Animations & Celebratory Fireworks
+#   - Procedural Audio Effects (Pops, Victory Fanfare, Buzz, Restart Jump)
+#   - Mouse & Keyboard ('R' to restart, ESC to exit) Controls
+# ==============================================================================
+
+(func drawPiece (val cx cy)
+  (if (== val 1)
+    # Player X: Thick luminous cyan diagonal cross
+    (block
+      (gfxDrawLine (- cx 24) (- cy 24) (+ cx 24) (+ cy 24) (gfxRgb 0 240 255))
+      (gfxDrawLine (- cx 23) (- cy 24) (+ cx 25) (+ cy 24) (gfxRgb 0 240 255))
+      (gfxDrawLine (- cx 25) (- cy 24) (+ cx 23) (+ cy 24) (gfxRgb 0 240 255))
+      (gfxDrawLine (- cx 24) (- cy 23) (+ cx 24) (+ cy 25) (gfxRgb 0 240 255))
+      (gfxDrawLine (- cx 24) (- cy 25) (+ cx 24) (+ cy 23) (gfxRgb 0 240 255))
+      
+      (gfxDrawLine (+ cx 24) (- cy 24) (- cx 24) (+ cy 24) (gfxRgb 0 240 255))
+      (gfxDrawLine (+ cx 25) (- cy 24) (- cx 23) (+ cy 24) (gfxRgb 0 240 255))
+      (gfxDrawLine (+ cx 23) (- cy 24) (- cx 25) (+ cy 24) (gfxRgb 0 240 255))
+      (gfxDrawLine (+ cx 24) (- cy 23) (- cx 24) (+ cy 25) (gfxRgb 0 240 255))
+      (gfxDrawLine (+ cx 24) (- cy 25) (- cx 24) (+ cy 23) (gfxRgb 0 240 255))))
+
+  (if (== val 2)
+    # Player O: Thick vibrant warm gold ring
+    (block
+      (gfxDrawCircle cx cy 26 (gfxRgb 255 180 50) 0)
+      (gfxDrawCircle cx cy 25 (gfxRgb 255 180 50) 0)
+      (gfxDrawCircle cx cy 24 (gfxRgb 255 180 50) 0)
+      (gfxDrawCircle cx cy 23 (gfxRgb 255 180 50) 0))))
+
+(func drawWinningLine (line_id)
+  # Row 0
+  (if (== line_id 1)
+    (block
+      (gfxDrawLine 55 119 305 119 (gfxRgb 50 255 180))
+      (gfxDrawLine 55 120 305 120 (gfxRgb 255 255 255))
+      (gfxDrawLine 55 121 305 121 (gfxRgb 50 255 180))))
+  # Row 1
+  (if (== line_id 2)
+    (block
+      (gfxDrawLine 55 209 305 209 (gfxRgb 50 255 180))
+      (gfxDrawLine 55 210 305 210 (gfxRgb 255 255 255))
+      (gfxDrawLine 55 211 305 211 (gfxRgb 50 255 180))))
+  # Row 2
+  (if (== line_id 3)
+    (block
+      (gfxDrawLine 55 299 305 299 (gfxRgb 50 255 180))
+      (gfxDrawLine 55 300 305 300 (gfxRgb 255 255 255))
+      (gfxDrawLine 55 301 305 301 (gfxRgb 50 255 180))))
+  # Col 0
+  (if (== line_id 4)
+    (block
+      (gfxDrawLine 89 85 89 335 (gfxRgb 50 255 180))
+      (gfxDrawLine 90 85 90 335 (gfxRgb 255 255 255))
+      (gfxDrawLine 91 85 91 335 (gfxRgb 50 255 180))))
+  # Col 1
+  (if (== line_id 5)
+    (block
+      (gfxDrawLine 179 85 179 335 (gfxRgb 50 255 180))
+      (gfxDrawLine 180 85 180 335 (gfxRgb 255 255 255))
+      (gfxDrawLine 181 85 181 335 (gfxRgb 50 255 180))))
+  # Col 2
+  (if (== line_id 6)
+    (block
+      (gfxDrawLine 269 85 269 335 (gfxRgb 50 255 180))
+      (gfxDrawLine 270 85 270 335 (gfxRgb 255 255 255))
+      (gfxDrawLine 271 85 271 335 (gfxRgb 50 255 180))))
+  # Diag 1 (\)
+  (if (== line_id 7)
+    (block
+      (gfxDrawLine 65 94 295 324 (gfxRgb 50 255 180))
+      (gfxDrawLine 65 95 295 325 (gfxRgb 255 255 255))
+      (gfxDrawLine 65 96 295 326 (gfxRgb 50 255 180))))
+  # Diag 2 (/)
+  (if (== line_id 8)
+    (block
+      (gfxDrawLine 295 94 65 324 (gfxRgb 50 255 180))
+      (gfxDrawLine 295 95 65 325 (gfxRgb 255 255 255))
+      (gfxDrawLine 295 96 65 326 (gfxRgb 50 255 180)))))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       AETHER TIC-TAC-TOE DESKTOP GAME INITIALIZING      ")
+  (call print "=========================================================")
+  
+  # Initialize Window: 360 x 420 resolution, Window mode
+  (let ok (gfxInit 360 420 "Aether Tic-Tac-Toe" "window" 1))
+  
+  # 3x3 Board cells (0 = empty, 1 = X, 2 = O)
+  (let c0 0) (let c1 0) (let c2 0)
+  (let c3 0) (let c4 0) (let c5 0)
+  (let c6 0) (let c7 0) (let c8 0)
+  
+  (let turn 1)       # 1 for X, 2 for O
+  (let winner 0)     # 0 = ongoing, 1 = X, 2 = O, 3 = Tie
+  (let win_line 0)   # 1..8 represents the 3-in-a-row line
+  (let moves 0)
+  (let anim_frame 0)
+  
+  (call print "Window active! Play with mouse clicks. Press R to restart, ESC to exit.\n")
+  
+  (while (not (gameShouldClose))
+    (gamePoll)
+    (set! anim_frame (+ anim_frame 1))
+    
+    # -------------------------------------------------------------------------
+    # Input Handling
+    # -------------------------------------------------------------------------
+    (let mx (gameMouseX))
+    (let my (gameMouseY))
+    (let clicked (gameIsMousePressed 0))
+    (let key_r (gameIsKeyPressed 82)) # Key 'R'
+    
+    # Detect hovered cell
+    (let hcol -1)
+    (let hrow -1)
+    (if (and (>= mx 45) (< mx 135)) (set! hcol 0))
+    (if (and (>= mx 135) (< mx 225)) (set! hcol 1))
+    (if (and (>= mx 225) (< mx 315)) (set! hcol 2))
+    (if (and (>= my 75) (< my 165)) (set! hrow 0))
+    (if (and (>= my 165) (< my 255)) (set! hrow 1))
+    (if (and (>= my 255) (< my 345)) (set! hrow 2))
+    
+    # Check restart button clicked
+    (let restart_hover (and (and (>= mx 105) (< mx 255)) (and (>= my 365) (< my 401))))
+    (if (or key_r (and clicked (or restart_hover (> winner 0))))
+      (block
+        (set! c0 0) (set! c1 0) (set! c2 0)
+        (set! c3 0) (set! c4 0) (set! c5 0)
+        (set! c6 0) (set! c7 0) (set! c8 0)
+        (set! turn 1)
+        (set! winner 0)
+        (set! win_line 0)
+        (set! moves 0)
+        (audioPlayJump)
+        (engineBurstParticles 180 383 (gfxRgb 0 200 255) 25)))
+        
+    # Cell placement logic
+    (if (and (and (and clicked (== winner 0)) (>= hcol 0)) (>= hrow 0))
+      (block
+        (let moved 0)
+        (let pcx 0)
+        (let pcy 0)
+        
+        (if (and (== hcol 0) (== hrow 0)) (if (== c0 0) (block (set! c0 turn) (set! moved 1) (set! pcx 90) (set! pcy 120))))
+        (if (and (== hcol 1) (== hrow 0)) (if (== c1 0) (block (set! c1 turn) (set! moved 1) (set! pcx 180) (set! pcy 120))))
+        (if (and (== hcol 2) (== hrow 0)) (if (== c2 0) (block (set! c2 turn) (set! moved 1) (set! pcx 270) (set! pcy 120))))
+        
+        (if (and (== hcol 0) (== hrow 1)) (if (== c3 0) (block (set! c3 turn) (set! moved 1) (set! pcx 90) (set! pcy 210))))
+        (if (and (== hcol 1) (== hrow 1)) (if (== c4 0) (block (set! c4 turn) (set! moved 1) (set! pcx 180) (set! pcy 210))))
+        (if (and (== hcol 2) (== hrow 1)) (if (== c5 0) (block (set! c5 turn) (set! moved 1) (set! pcx 270) (set! pcy 210))))
+        
+        (if (and (== hcol 0) (== hrow 2)) (if (== c6 0) (block (set! c6 turn) (set! moved 1) (set! pcx 90) (set! pcy 300))))
+        (if (and (== hcol 1) (== hrow 2)) (if (== c7 0) (block (set! c7 turn) (set! moved 1) (set! pcx 180) (set! pcy 300))))
+        (if (and (== hcol 2) (== hrow 2)) (if (== c8 0) (block (set! c8 turn) (set! moved 1) (set! pcx 270) (set! pcy 300))))
+        
+        (if (== moved 1)
+          (block
+            (set! moves (+ moves 1))
+            
+            # Sound effect & particles for move
+            (if (== turn 1)
+              (block
+                (audioPlayTone 540 35)
+                (engineBurstParticles pcx pcy (gfxRgb 0 240 255) 16))
+              (block
+                (audioPlayTone 720 35)
+                (engineBurstParticles pcx pcy (gfxRgb 255 180 50) 16)))
+                
+            # Win Detection Checks
+            # Rows
+            (if (and (and (!= c0 0) (== c0 c1)) (== c1 c2)) (block (set! winner c0) (set! win_line 1)))
+            (if (and (and (!= c3 0) (== c3 c4)) (== c4 c5)) (block (set! winner c3) (set! win_line 2)))
+            (if (and (and (!= c6 0) (== c6 c7)) (== c7 c8)) (block (set! winner c6) (set! win_line 3)))
+            # Cols
+            (if (and (and (!= c0 0) (== c0 c3)) (== c3 c6)) (block (set! winner c0) (set! win_line 4)))
+            (if (and (and (!= c1 0) (== c1 c4)) (== c4 c7)) (block (set! winner c1) (set! win_line 5)))
+            (if (and (and (!= c2 0) (== c2 c5)) (== c5 c8)) (block (set! winner c2) (set! win_line 6)))
+            # Diagonals
+            (if (and (and (!= c0 0) (== c0 c4)) (== c4 c8)) (block (set! winner c0) (set! win_line 7)))
+            (if (and (and (!= c2 0) (== c2 c4)) (== c4 c6)) (block (set! winner c2) (set! win_line 8)))
+            
+            (if (> winner 0)
+              (block
+                (audioPlayLaser)
+                (engineBurstParticles 180 210 (gfxRgb 50 255 180) 40))
+              (if (== moves 9)
+                (block
+                  (set! winner 3) # Tie
+                  (audioPlayTone 220 180)
+                  (engineBurstParticles 180 210 (gfxRgb 160 170 190) 25))
+                (block
+                  # Next turn
+                  (if (== turn 1) (set! turn 2) (set! turn 1)))))))))
+
+    # -------------------------------------------------------------------------
+    # Graphics Rendering
+    # -------------------------------------------------------------------------
+    # Clear screen with dark modern slate
+    (gfxClear (gfxRgb 20 22 30))
+    
+    # Title banner
+    (gfxDrawText 132 18 "TIC-TAC-TOE" (gfxRgb 220 225 240))
+    
+    # Status Header text
+    (if (== winner 0)
+      (if (== turn 1)
+        (gfxDrawText 116 42 "PLAYER X'S TURN" (gfxRgb 0 240 255))
+        (gfxDrawText 116 42 "PLAYER O'S TURN" (gfxRgb 255 180 50))))
+    (if (== winner 1)
+      (gfxDrawText 124 42 "PLAYER X WINS!" (gfxRgb 0 255 180)))
+    (if (== winner 2)
+      (gfxDrawText 124 42 "PLAYER O WINS!" (gfxRgb 255 200 60)))
+    (if (== winner 3)
+      (gfxDrawText 112 42 "GAME OVER: DRAW!" (gfxRgb 180 185 200)))
+      
+    # Draw Board Grid Background Cells
+    (let r 0)
+    (while (< r 3)
+      (let col_idx 0)
+      (while (< col_idx 3)
+        (let cell_x (+ 45 (* col_idx 90)))
+        (let cell_y (+ 75 (* r 90)))
+        (let is_hover (and (and (== hcol col_idx) (== hrow r)) (== winner 0)))
+        
+        # Subtle cell tile background
+        (if is_hover
+          (gfxDrawRect (+ cell_x 3) (+ cell_y 3) 84 84 (gfxRgb 35 42 58) 1)
+          (gfxDrawRect (+ cell_x 3) (+ cell_y 3) 84 84 (gfxRgb 26 29 40) 1))
+          
+        (set! col_idx (+ col_idx 1)))
+      (set! r (+ r 1)))
+      
+    # Draw Grid divider lines
+    (gfxDrawRect 133 75 4 270 (gfxRgb 60 70 95) 1)
+    (gfxDrawRect 223 75 4 270 (gfxRgb 60 70 95) 1)
+    (gfxDrawRect 45 163 270 4 (gfxRgb 60 70 95) 1)
+    (gfxDrawRect 45 253 270 4 (gfxRgb 60 70 95) 1)
+    
+    # Outer board border
+    (gfxDrawRect 45 75 270 270 (gfxRgb 80 95 125) 0)
+    
+    # Draw Pieces in each cell
+    (call drawPiece c0 90 120)
+    (call drawPiece c1 180 120)
+    (call drawPiece c2 270 120)
+    
+    (call drawPiece c3 90 210)
+    (call drawPiece c4 180 210)
+    (call drawPiece c5 270 210)
+    
+    (call drawPiece c6 90 300)
+    (call drawPiece c7 180 300)
+    (call drawPiece c8 270 300)
+    
+    # Winning strike line
+    (if (> win_line 0)
+      (block
+        (call drawWinningLine win_line)
+        # Celebratory sparkle animation
+        (if (== (% anim_frame 8) 0)
+          (engineBurstParticles 180 210 (gfxRgb 255 240 100) 4))))
+          
+    # Restart Button
+    (if restart_hover
+      (gfxDrawRect 105 365 150 36 (gfxRgb 50 75 110) 1)
+      (gfxDrawRect 105 365 150 36 (gfxRgb 32 40 56) 1))
+      
+    (gfxDrawRect 105 365 150 36 (gfxRgb 80 110 160) 0)
+    (gfxDrawText 132 379 "RESTART (R)" (gfxRgb 220 230 250))
+    
+    # Present frame (updates particle system and flips buffer)
+    (gamePresent))
+    
+  (call print "Tic-Tac-Toe closed cleanly.")
+  (return 0))
+

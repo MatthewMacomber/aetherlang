@@ -1,0 +1,82 @@
+# ==============================================================================
+# App 2: 2D Orbital Mechanics & Gravitational Physics Simulator
+# Demonstrates: Iterative Simulation Loops, Vector/Coordinate Calculations,
+#               Gravitational Dynamics & Conservation of Energy.
+# ==============================================================================
+
+(func compute_distance (x y)
+  (let dist_sq (+ (* x x) (* y y)))
+  # Simple Newton-Raphson approximation for sqrt
+  (let guess 10.0)
+  (let iter 0)
+  (while (< iter 6)
+    (set guess (* 0.5 (+ guess (/ dist_sq guess))))
+    (set iter (+ iter 1)))
+  (return guess))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "      AETHER SIMULATION: 2D ORBITAL MECHANICS SIM        ")
+  (call print "=========================================================")
+
+  # Simulation Parameters
+  # Sun at origin (0, 0) with mass M = 1000.0
+  (let G 1.0)
+  (let M 1000.0)
+  (let dt 0.05)
+
+  # Initial Satellite State (circular orbit at radius R = 10.0)
+  # v_circ = sqrt(G * M / R) = sqrt(100) = 10.0
+  (let pos_x 10.0)
+  (let pos_y 0.0)
+  (let vel_x 0.0)
+  (let vel_y 10.0)
+
+  (call print "Initial Position: [ x =" pos_x "y =" pos_y "]")
+  (call print "Initial Velocity: [ vx =" vel_x "vy =" vel_y "]")
+  (call print "Time Step dt:" dt)
+  (call print "---------------------------------------------------------")
+
+  (let step 0)
+  (let max_steps 20)
+
+  (while (< step max_steps)
+    # 1. Compute radial distance r
+    (let r (call compute_distance pos_x pos_y))
+
+    # 2. Compute gravitational acceleration magnitude: a = G * M / (r^3)
+    (let r_cubed (* (* r r) r))
+    (let a_mag (/ (* G M) r_cubed))
+
+    # 3. Acceleration components directed toward origin (0, 0)
+    (let ax (- 0.0 (* a_mag pos_x)))
+    (let ay (- 0.0 (* a_mag pos_y)))
+
+    # 4. Integrate velocity and position (Euler-Cromer integration)
+    (set vel_x (+ vel_x (* ax dt)))
+    (set vel_y (+ vel_y (* ay dt)))
+    (set pos_x (+ pos_x (* vel_x dt)))
+    (set pos_y (+ pos_y (* vel_y dt)))
+
+    # 5. Energy calculation: Kinetic = 0.5 * (vx^2 + vy^2), Potential = -G*M/r
+    (let v_sq (+ (* vel_x vel_x) (* vel_y vel_y)))
+    (let e_kin (* 0.5 v_sq))
+    (let e_pot (- 0.0 (/ (* G M) r)))
+    (let e_tot (+ e_kin e_pot))
+
+    # Print orbit telemetric snapshot every 5 steps
+    (let rem (- step (* (/ step 5) 5)))
+    (if (== rem 0)
+      (call print "Step" step ": Pos = [" pos_x pos_y "] Radius =" r "Energy =" e_tot))
+
+    (set step (+ step 1)))
+
+  (call print "---------------------------------------------------------")
+  (call print "Final Orbit State after" max_steps "steps:")
+  (let final_r (call compute_distance pos_x pos_y))
+  (call print "Final Position: [ x =" pos_x "y =" pos_y "]")
+  (call print "Final Orbit Radius:" final_r)
+  (call print "=========================================================")
+  (call print "         ORBITAL SIMULATION COMPLETED SUCCESSFULLY       ")
+  (call print "=========================================================")
+  (return 0))

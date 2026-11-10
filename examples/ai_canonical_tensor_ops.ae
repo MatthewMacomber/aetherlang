@@ -20,4 +20,4 @@
   (call print "Tensor operations completed successfully.")
   
   (call print "=== FINISHED AI Canonical Tensor Operations Example ===")
-  (return 0)))
+  (return 0))

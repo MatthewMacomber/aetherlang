@@ -1,0 +1,334 @@
+# ==============================================================================
+# AETHER INVADERS: Complete Arcade Space Shooter
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func selfCheck ()
+  (call print "=== Self Check: Aether Invaders ===")
+  # Test AABB collision overlap
+  (let hit (call phys.check_aabb 10.0 10.0 4.0 4.0 12.0 12.0 4.0 4.0))
+  (if (== hit false)
+    (return 0)
+    0)
+  # Test AABB separation
+  (let miss (call phys.check_aabb 10.0 10.0 4.0 4.0 30.0 30.0 4.0 4.0))
+  (if (== miss true)
+    (return 0)
+    0)
+  (call print "[Self-Check] Collision detection verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "                 AETHER INVADERS ARCADE                  ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  (let ok (gfxInit 480 360 "Aether Invaders" backend 1))
+  (call print "Aether Invaders initialized. Arrow keys / A-D to move, Space to fire, R to restart, ESC to quit.")
+
+  # Game Variables
+  (let player_x 220.0)
+  (let player_y 320.0)
+  (let player_w 24.0)
+  (let player_h 12.0)
+  (let player_speed 5.0)
+  (let lives 3)
+  (let score 0)
+  (let game_state 1) # 1 = Playing, 2 = Victory, 3 = Game Over
+
+  # Player Bullet
+  (let bx 0.0)
+  (let by 0.0)
+  (let b_active 0)
+
+  # Enemy Bullet
+  (let ebx 0.0)
+  (let eby 0.0)
+  (let eb_active 0)
+
+  # Alien Armada (8 Invaders: 2 rows of 4)
+  # row 0: y=40, cols: 60, 140, 220, 300
+  # row 1: y=80, cols: 60, 140, 220, 300
+  (let ax (list 60.0 140.0 220.0 300.0 60.0 140.0 220.0 300.0))
+  (let ay (list 40.0 40.0 40.0 40.0 80.0 80.0 80.0 80.0))
+  (let a_alive (list 1 1 1 1 1 1 1 1))
+  (let a_w 28.0)
+  (let a_h 18.0)
+  (let fleet_dir 1.0)
+  (let fleet_speed 1.5)
+  (let aliens_remaining 8)
+
+  # Bunkers (3 shields at y=260)
+  (let b1_hp 3)
+  (let b2_hp 3)
+  (let b3_hp 3)
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # In headless test mode, exit cleanly after 30 ticks
+    (if (and (== headless 1) (> frame 30))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # R restarts
+    (if (gameIsKeyPressed 82)
+      (block
+        (set! player_x 220.0)
+        (set! lives 3)
+        (set! score 0)
+        (set! game_state 1)
+        (set! b_active 0)
+        (set! eb_active 0)
+        (set! b1_hp 3)
+        (set! b2_hp 3)
+        (set! b3_hp 3)
+        (let ri 0)
+        (while (< ri 8)
+          (set_at a_alive ri 1)
+          (set! ri (+ ri 1)))
+        (set! aliens_remaining 8)
+        (set! fleet_speed 1.5)
+        (set! fleet_dir 1.0)))
+
+    # -------------------------------------------------------------------------
+    # Update logic when PLAYING
+    # -------------------------------------------------------------------------
+    (if (== game_state 1)
+      (block
+        # Player movement
+        (if (or (gameIsKeyDown 37) (gameIsKeyDown 65)) # Left / A
+          (set! player_x (- player_x player_speed))
+          0)
+        (if (or (gameIsKeyDown 39) (gameIsKeyDown 68)) # Right / D
+          (set! player_x (+ player_x player_speed))
+          0)
+        (if (< player_x 10.0) (set! player_x 10.0) 0)
+        (if (> player_x 446.0) (set! player_x 446.0) 0)
+
+        # Player shoot (Space key = 32)
+        (if (and (gameIsKeyPressed 32) (== b_active 0))
+          (block
+            (set! bx (+ player_x 10.0))
+            (set! by (- player_y 6.0))
+            (set! b_active 1)
+            (audioPlayLaser)))
+
+        # Move player bullet
+        (if (== b_active 1)
+          (block
+            (set! by (- by 8.0))
+            (if (< by 0.0)
+              (set! b_active 0)
+              0)))
+
+        # Move alien fleet
+        (let hit_edge 0)
+        (let ai 0)
+        (while (< ai 8)
+          (if (== (get a_alive ai) 1)
+            (block
+              (let cur_x (get ax ai))
+              (let next_x (+ cur_x (* fleet_dir fleet_speed)))
+              (set_at ax ai next_x)
+              (if (or (< next_x 20.0) (> next_x 430.0))
+                (set! hit_edge 1)
+                0))
+            0)
+          (set! ai (+ ai 1)))
+
+        # Bounce fleet and drop down
+        (if (== hit_edge 1)
+          (block
+            (set! fleet_dir (* fleet_dir -1.0))
+            (let di 0)
+            (while (< di 8)
+              (let cur_y (get ay di))
+              (set_at ay di (+ cur_y 10.0))
+              (if (and (== (get a_alive di) 1) (> cur_y 290.0))
+                (set! game_state 3) # Invaders reached player base!
+                0)
+              (set! di (+ di 1)))))
+
+        # Enemy randomly fires bullet
+        (if (and (== eb_active 0) (> aliens_remaining 0))
+          (if (== (% frame 45) 0)
+            (block
+              # Pick first living alien to fire
+              (let fi 7)
+              (while (>= fi 0)
+                (if (== (get a_alive fi) 1)
+                  (block
+                    (set! ebx (+ (get ax fi) 12.0))
+                    (set! eby (+ (get ay fi) 18.0))
+                    (set! eb_active 1)
+                    (set! fi -1)) # break
+                  (set! fi (- fi 1)))))))
+
+        # Move enemy bullet
+        (if (== eb_active 1)
+          (block
+            (set! eby (+ eby 4.5))
+            (if (> eby 360.0)
+              (set! eb_active 0)
+              0)
+            # Check collision with player
+            (let pHit (call phys.check_aabb ebx eby 4.0 8.0 player_x player_y player_w player_h))
+            (if (== pHit true)
+              (block
+                (set! eb_active 0)
+                (set! lives (- lives 1))
+                (audioPlayExplosion)
+                (if (<= lives 0)
+                  (set! game_state 3) # Game over
+                  0)))))
+
+        # Check player bullet collision with aliens
+        (if (== b_active 1)
+          (block
+            (let ci 0)
+            (while (< ci 8)
+              (if (== (get a_alive ci) 1)
+                (block
+                  (let aHit (call phys.check_aabb bx by 4.0 8.0 (get ax ci) (get ay ci) a_w a_h))
+                  (if (== aHit true)
+                    (block
+                      (set_at a_alive ci 0)
+                      (set! b_active 0)
+                      (set! score (+ score 100))
+                      (set! aliens_remaining (- aliens_remaining 1))
+                      (set! fleet_speed (+ fleet_speed 0.4))
+                      (audioPlayExplosion)
+                      (if (<= aliens_remaining 0)
+                        (set! game_state 2) # Victory!
+                        0))))
+                0)
+              (set! ci (+ ci 1)))))
+
+        # Check bullet collisions with Bunkers
+        # Bunker 1 at x=100, Bunker 2 at x=220, Bunker 3 at x=340
+        (if (== b_active 1)
+          (block
+            (if (and (> b1_hp 0) (call phys.check_aabb bx by 4.0 8.0 100.0 260.0 40.0 16.0))
+              (do (set! b1_hp (- b1_hp 1)) (set! b_active 0)) 0)
+            (if (and (> b2_hp 0) (call phys.check_aabb bx by 4.0 8.0 220.0 260.0 40.0 16.0))
+              (do (set! b2_hp (- b2_hp 1)) (set! b_active 0)) 0)
+            (if (and (> b3_hp 0) (call phys.check_aabb bx by 4.0 8.0 340.0 260.0 40.0 16.0))
+              (do (set! b3_hp (- b3_hp 1)) (set! b_active 0)) 0)))
+
+        (if (== eb_active 1)
+          (block
+            (if (and (> b1_hp 0) (call phys.check_aabb ebx eby 4.0 8.0 100.0 260.0 40.0 16.0))
+              (do (set! b1_hp (- b1_hp 1)) (set! eb_active 0)) 0)
+            (if (and (> b2_hp 0) (call phys.check_aabb ebx eby 4.0 8.0 220.0 260.0 40.0 16.0))
+              (do (set! b2_hp (- b2_hp 1)) (set! eb_active 0)) 0)
+            (if (and (> b3_hp 0) (call phys.check_aabb ebx eby 4.0 8.0 340.0 260.0 40.0 16.0))
+              (do (set! b3_hp (- b3_hp 1)) (set! eb_active 0)) 0)))))
+
+    # -------------------------------------------------------------------------
+    # RENDER FRAME
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 8 10 24))
+
+    # Draw Stars
+    (gfxDrawPixel 40 30 (gfxRgb 200 200 255))
+    (gfxDrawPixel 120 70 (gfxRgb 180 180 220))
+    (gfxDrawPixel 250 45 (gfxRgb 255 255 255))
+    (gfxDrawPixel 380 90 (gfxRgb 220 220 255))
+    (gfxDrawPixel 450 140 (gfxRgb 190 190 240))
+    (gfxDrawPixel 80 180 (gfxRgb 255 255 255))
+    (gfxDrawPixel 310 210 (gfxRgb 210 210 255))
+    (gfxDrawPixel 190 280 (gfxRgb 180 180 230))
+
+    # Draw Living Aliens
+    (let ri 0)
+    (while (< ri 8)
+      (if (== (get a_alive ri) 1)
+        (block
+          (let x (get ax ri))
+          (let y (get ay ri))
+          (if (< ri 4)
+            # Row 0: Red/Orange commander invaders
+            (gfxDrawRect x y a_w a_h (gfxRgb 255 70 80) 1)
+            # Row 1: Cyan soldier invaders
+            (gfxDrawRect x y a_w a_h (gfxRgb 50 220 240) 1))
+          # Alien eyes
+          (gfxDrawRect (+ x 6.0) (+ y 4.0) 4.0 4.0 (gfxRgb 255 255 255) 1)
+          (gfxDrawRect (+ x 18.0) (+ y 4.0) 4.0 4.0 (gfxRgb 255 255 255) 1)))
+      (set! ri (+ ri 1)))
+
+    # Draw Bunkers
+    (if (> b1_hp 0) (gfxDrawRect 100 260 40 16 (gfxRgb 40 180 80) 1) 0)
+    (if (> b2_hp 0) (gfxDrawRect 220 260 40 16 (gfxRgb 40 180 80) 1) 0)
+    (if (> b3_hp 0) (gfxDrawRect 340 260 40 16 (gfxRgb 40 180 80) 1) 0)
+
+    # Draw Player Ship (Green/Teal)
+    (if (> lives 0)
+      (block
+        (gfxDrawRect player_x player_y player_w player_h (gfxRgb 60 250 140) 1)
+        (gfxDrawRect (+ player_x 9.0) (- player_y 5.0) 6.0 5.0 (gfxRgb 100 255 200) 1)))
+
+    # Draw Bullets
+    (if (== b_active 1)
+      (gfxDrawRect bx by 4 8 (gfxRgb 255 240 50) 1)
+      0)
+    (if (== eb_active 1)
+      (gfxDrawRect ebx eby 4 8 (gfxRgb 255 50 100) 1)
+      0)
+
+    # HUD Banner
+    (gfxDrawRect 0 0 480 24 (gfxRgb 16 18 36) 1)
+    (gfxDrawText 12 6 "AETHER INVADERS" (gfxRgb 100 220 255))
+    (gfxDrawText 200 6 (str_join (list "SCORE: " score) "") (gfxRgb 255 230 80))
+    (gfxDrawText 360 6 (str_join (list "SHIELDS: " lives) "") (gfxRgb 80 255 120))
+
+    # Overlays
+    (if (== game_state 2)
+      (block
+        (gfxDrawRect 120 130 240 70 (gfxRgb 20 24 40) 1)
+        (gfxDrawRect 120 130 240 70 (gfxRgb 50 250 120) 0)
+        (gfxDrawText 160 146 "VICTORY ACHIEVED!" (gfxRgb 80 255 140))
+        (gfxDrawText 140 170 "PRESS 'R' TO PLAY AGAIN" (gfxRgb 220 240 255))))
+
+    (if (== game_state 3)
+      (block
+        (gfxDrawRect 120 130 240 70 (gfxRgb 36 16 24) 1)
+        (gfxDrawRect 120 130 240 70 (gfxRgb 255 60 80) 0)
+        (gfxDrawText 176 146 "GAME OVER" (gfxRgb 255 70 90))
+        (gfxDrawText 140 170 "PRESS 'R' TO RESTART" (gfxRgb 240 220 230))))
+
+    (gamePresent))
+
+  (call print "Aether Invaders closed cleanly.")
+  (return 0))

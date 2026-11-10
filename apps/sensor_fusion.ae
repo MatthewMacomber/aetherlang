@@ -1,0 +1,83 @@
+# ==============================================================================
+# App 3: Autonomous Sensor Fusion & State Estimator (Kalman Filter)
+# Demonstrates: Probabilistic Distributions, Sampling, Uncertainty Types,
+#               Inverse-Variance Optimal Weighting & Likelihood Observation.
+# ==============================================================================
+
+(func fuse_measurements (z1_val z1_err z2_val z2_err)
+  # Optimal inverse-variance fusion for two Gaussian estimators
+  (let w1 (/ 1.0 (* z1_err z1_err)))
+  (let w2 (/ 1.0 (* z2_err z2_err)))
+  (let sum_w (+ w1 w2))
+  
+  # Fused mean and standard deviation
+  (let fused_mean (/ (+ (* z1_val w1) (* z2_val w2)) sum_w))
+  # Simple sqrt approximation for fused standard deviation
+  (let var_fused (/ 1.0 sum_w))
+  (let guess 0.5)
+  (let iter 0)
+  (while (< iter 5)
+    (set guess (* 0.5 (+ guess (/ var_fused guess))))
+    (set iter (+ iter 1)))
+  (let fused_err guess)
+  
+  (return (uncertain fused_mean fused_err)))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "      AETHER PROBABILISTIC: SENSOR FUSION PIPELINE       ")
+  (call print "=========================================================")
+
+  # Ground truth obstacle distance ahead of autonomous vehicle (meters)
+  (let true_distance 45.0)
+  (call print "True Ground Truth Distance to Obstacle:" true_distance "m")
+  (call print "---------------------------------------------------------")
+
+  # Sensor characteristics:
+  # LiDAR: High precision (std = 0.25 m)
+  # Radar: Lower precision, immune to fog (std = 1.20 m)
+  (let lidar_std 0.25)
+  (let radar_std 1.20)
+
+  (let tick 0)
+  (let max_ticks 4)
+
+  (while (< tick max_ticks)
+    (call print ">>> Telemetry Frame" (+ tick 1) "<<<")
+
+    # Sample noisy measurements from real sensor distributions
+    (let lidar_noise (sample (Normal 0.0 lidar_std)))
+    (let radar_noise (sample (Normal 0.0 radar_std)))
+
+    (let z_lidar (+ true_distance lidar_noise))
+    (let z_radar (+ true_distance radar_noise))
+
+    (let u_lidar (uncertain z_lidar lidar_std))
+    (let u_radar (uncertain z_radar radar_std))
+
+    (call print "  LiDAR Measurement: " u_lidar "m")
+    (call print "  Radar Measurement: " u_radar "m")
+
+    # Execute optimal Kalman sensor fusion
+    (let fused (call fuse_measurements z_lidar lidar_std z_radar radar_std))
+    (call print "  => Fused Estimate: " fused "m")
+
+    # Observe fused measurement against prior hypothesis
+    (observe fused true_distance (Normal true_distance 0.30))
+
+    (set tick (+ tick 1)))
+
+  (call print "---------------------------------------------------------")
+  (call print "Demonstrating Uncertainty Arithmetic Propagation:")
+  (let u1 (uncertain 10.0 0.2))
+  (let u2 (uncertain 20.0 0.3))
+  (let u_sum (+ u1 u2))
+  (let u_prod (* u1 u2))
+  (call print "u1 = 10.0 ± 0.2, u2 = 20.0 ± 0.3")
+  (call print "u1 + u2 =" u_sum)
+  (call print "u1 * u2 =" u_prod)
+  (call print "=========================================================")
+  (call print "        SENSOR FUSION PIPELINE COMPLETED SUCCESSFULLY     ")
+  (call print "=========================================================")
+  (return 0))
+

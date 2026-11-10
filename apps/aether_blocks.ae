@@ -1,0 +1,1161 @@
+# ==============================================================================
+# AETHER BLOCKS: Complete Standalone Arcade Falling-Block Puzzler
+# Created with the Aether Programming Language
+#
+# Features:
+#   - Real-time Multi-Voice Audio Mixer with Chiptune Soundtrack & Polyphonic SFX
+#   - 7-Bag Randomizer (Fisher-Yates) & Next Piece Queue (3 Pieces)
+#   - Mathematical Tetromino Box Rotations with 6-Offset Wall Kick Recovery
+#   - Ghost Piece Projection & Single-Drop Hold Slot
+#   - Delayed Auto Shift (DAS) & 0.5s Ground Lock Delay
+#   - Line Clears, Exponential Scoring, Progressive Level Gravity & Particle Bursts
+#   - Persistent High Score Save File (aether_blocks.save)
+#   - Standalone Console-Free Native Release Mode (--release)
+#   - Automated Startup Self-Check Verification
+# ==============================================================================
+
+# Helper: Get relative coordinate for piece p (1..7), block bidx (0..3), is_y (0=X, 1=Y) at rotation 0
+(func getBaseCoord (p bidx is_y)
+  # Piece 1: I (Box 4x4)
+  (if (== p 1)
+    (if (== is_y 0)
+      (return bidx)
+      (return 1)))
+      
+  # Piece 2: O (Box 2x2)
+  (if (== p 2)
+    (block
+      (if (== bidx 0) (if (== is_y 0) (return 0) (return 0)))
+      (if (== bidx 1) (if (== is_y 0) (return 1) (return 0)))
+      (if (== bidx 2) (if (== is_y 0) (return 0) (return 1)))
+      (if (== bidx 3) (if (== is_y 0) (return 1) (return 1)))))
+      
+  # Piece 3: T (Box 3x3)
+  (if (== p 3)
+    (block
+      (if (== bidx 0) (if (== is_y 0) (return 1) (return 0)))
+      (if (== bidx 1) (if (== is_y 0) (return 0) (return 1)))
+      (if (== bidx 2) (if (== is_y 0) (return 1) (return 1)))
+      (if (== bidx 3) (if (== is_y 0) (return 2) (return 1)))))
+      
+  # Piece 4: S (Box 3x3)
+  (if (== p 4)
+    (block
+      (if (== bidx 0) (if (== is_y 0) (return 1) (return 0)))
+      (if (== bidx 1) (if (== is_y 0) (return 2) (return 0)))
+      (if (== bidx 2) (if (== is_y 0) (return 0) (return 1)))
+      (if (== bidx 3) (if (== is_y 0) (return 1) (return 1)))))
+      
+  # Piece 5: Z (Box 3x3)
+  (if (== p 5)
+    (block
+      (if (== bidx 0) (if (== is_y 0) (return 0) (return 0)))
+      (if (== bidx 1) (if (== is_y 0) (return 1) (return 0)))
+      (if (== bidx 2) (if (== is_y 0) (return 1) (return 1)))
+      (if (== bidx 3) (if (== is_y 0) (return 2) (return 1)))))
+      
+  # Piece 6: J (Box 3x3)
+  (if (== p 6)
+    (block
+      (if (== bidx 0) (if (== is_y 0) (return 0) (return 0)))
+      (if (== bidx 1) (if (== is_y 0) (return 0) (return 1)))
+      (if (== bidx 2) (if (== is_y 0) (return 1) (return 1)))
+      (if (== bidx 3) (if (== is_y 0) (return 2) (return 1)))))
+      
+  # Piece 7: L (Box 3x3)
+  (if (== p 7)
+    (block
+      (if (== bidx 0) (if (== is_y 0) (return 2) (return 0)))
+      (if (== bidx 1) (if (== is_y 0) (return 0) (return 1)))
+      (if (== bidx 2) (if (== is_y 0) (return 1) (return 1)))
+      (if (== bidx 3) (if (== is_y 0) (return 2) (return 1)))))
+  (return 0))
+
+# Mathematical Box 90-degree Clockwise Rotation
+(func getRotCoord (p rot bidx is_y)
+  (let n 3)
+  (if (== p 1) (set! n 4))
+  (if (== p 2) (set! n 2))
+  (let bx (call getBaseCoord p bidx 0))
+  (let by (call getBaseCoord p bidx 1))
+  (let r (% rot 4))
+  (while (> r 0)
+    (let nx (- (- n 1) by))
+    (let ny bx)
+    (set! bx nx)
+    (set! by ny)
+    (set! r (- r 1)))
+  (if (== is_y 0) (return bx) (return by)))
+
+# Full Super Rotation System (SRS) Wall Kick Tables
+# piece: 1=I, 2=O, 3=T, 4=S, 5=Z, 6=J, 7=L
+# from_rot, to_rot in 0..3, test_idx in 0..4
+(func getSrsKickX (p from_rot to_rot test_idx)
+  (if (== p 2) (return 0)) # O-piece doesn't kick
+  (if (== test_idx 0) (return 0))
+  # Standard JLSTZ kicks
+  (if (!= p 1)
+    (block
+      (if (and (== from_rot 0) (== to_rot 1)) # 0 -> R
+        (block
+          (if (== test_idx 1) (return -1))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return -1))))
+      (if (and (== from_rot 1) (== to_rot 0)) # R -> 0
+        (block
+          (if (== test_idx 1) (return 1))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return 1))))
+      (if (and (== from_rot 1) (== to_rot 2)) # R -> 2
+        (block
+          (if (== test_idx 1) (return 1))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return 1))))
+      (if (and (== from_rot 2) (== to_rot 1)) # 2 -> R
+        (block
+          (if (== test_idx 1) (return -1))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return -1))))
+      (if (and (== from_rot 2) (== to_rot 3)) # 2 -> L
+        (block
+          (if (== test_idx 1) (return 1))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return 1))))
+      (if (and (== from_rot 3) (== to_rot 2)) # L -> 2
+        (block
+          (if (== test_idx 1) (return -1))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return -1))))
+      (if (and (== from_rot 3) (== to_rot 0)) # L -> 0
+        (block
+          (if (== test_idx 1) (return -1))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return -1))))
+      (if (and (== from_rot 0) (== to_rot 3)) # 0 -> L
+        (block
+          (if (== test_idx 1) (return 1))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return 0))
+          (if (== test_idx 4) (return 1))))
+      (return 0)))
+  # I-piece kicks
+  (if (and (== from_rot 0) (== to_rot 1))
+    (block
+      (if (== test_idx 1) (return -2))
+      (if (== test_idx 2) (return 1))
+      (if (== test_idx 3) (return -2))
+      (if (== test_idx 4) (return 1))))
+  (if (and (== from_rot 1) (== to_rot 0))
+    (block
+      (if (== test_idx 1) (return 2))
+      (if (== test_idx 2) (return -1))
+      (if (== test_idx 3) (return 2))
+      (if (== test_idx 4) (return -1))))
+  (if (and (== from_rot 1) (== to_rot 2))
+    (block
+      (if (== test_idx 1) (return -1))
+      (if (== test_idx 2) (return 2))
+      (if (== test_idx 3) (return -1))
+      (if (== test_idx 4) (return 2))))
+  (if (and (== from_rot 2) (== to_rot 1))
+    (block
+      (if (== test_idx 1) (return 1))
+      (if (== test_idx 2) (return -2))
+      (if (== test_idx 3) (return 1))
+      (if (== test_idx 4) (return -2))))
+  (if (and (== from_rot 2) (== to_rot 3))
+    (block
+      (if (== test_idx 1) (return 2))
+      (if (== test_idx 2) (return -1))
+      (if (== test_idx 3) (return 2))
+      (if (== test_idx 4) (return -1))))
+  (if (and (== from_rot 3) (== to_rot 2))
+    (block
+      (if (== test_idx 1) (return -2))
+      (if (== test_idx 2) (return 1))
+      (if (== test_idx 3) (return -2))
+      (if (== test_idx 4) (return 1))))
+  (if (and (== from_rot 3) (== to_rot 0))
+    (block
+      (if (== test_idx 1) (return 1))
+      (if (== test_idx 2) (return -2))
+      (if (== test_idx 3) (return 1))
+      (if (== test_idx 4) (return -2))))
+  (if (and (== from_rot 0) (== to_rot 3))
+    (block
+      (if (== test_idx 1) (return -1))
+      (if (== test_idx 2) (return 2))
+      (if (== test_idx 3) (return -1))
+      (if (== test_idx 4) (return 2))))
+  (return 0))
+
+(func getSrsKickY (p from_rot to_rot test_idx)
+  (if (== p 2) (return 0))
+  (if (== test_idx 0) (return 0))
+  # In grid coordinates: screen_dy = -srs_dy (up is negative in screen Y)
+  (if (!= p 1)
+    (block
+      (if (and (== from_rot 0) (== to_rot 1))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 2))
+          (if (== test_idx 4) (return 2))))
+      (if (and (== from_rot 1) (== to_rot 0))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return -2))
+          (if (== test_idx 4) (return -2))))
+      (if (and (== from_rot 1) (== to_rot 2))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return -2))
+          (if (== test_idx 4) (return -2))))
+      (if (and (== from_rot 2) (== to_rot 1))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 2))
+          (if (== test_idx 4) (return 2))))
+      (if (and (== from_rot 2) (== to_rot 3))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 2))
+          (if (== test_idx 4) (return 2))))
+      (if (and (== from_rot 3) (== to_rot 2))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return -2))
+          (if (== test_idx 4) (return -2))))
+      (if (and (== from_rot 3) (== to_rot 0))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return 1))
+          (if (== test_idx 3) (return -2))
+          (if (== test_idx 4) (return -2))))
+      (if (and (== from_rot 0) (== to_rot 3))
+        (block
+          (if (== test_idx 1) (return 0))
+          (if (== test_idx 2) (return -1))
+          (if (== test_idx 3) (return 2))
+          (if (== test_idx 4) (return 2))))
+      (return 0)))
+  # I-piece kicks
+  (if (and (== from_rot 0) (== to_rot 1))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return 1))
+      (if (== test_idx 4) (return -2))))
+  (if (and (== from_rot 1) (== to_rot 0))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return -1))
+      (if (== test_idx 4) (return 2))))
+  (if (and (== from_rot 1) (== to_rot 2))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return -2))
+      (if (== test_idx 4) (return 1))))
+  (if (and (== from_rot 2) (== to_rot 1))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return 2))
+      (if (== test_idx 4) (return -1))))
+  (if (and (== from_rot 2) (== to_rot 3))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return -1))
+      (if (== test_idx 4) (return 2))))
+  (if (and (== from_rot 3) (== to_rot 2))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return 1))
+      (if (== test_idx 4) (return -2))))
+  (if (and (== from_rot 3) (== to_rot 0))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return 2))
+      (if (== test_idx 4) (return -1))))
+  (if (and (== from_rot 0) (== to_rot 3))
+    (block
+      (if (== test_idx 1) (return 0))
+      (if (== test_idx 2) (return 0))
+      (if (== test_idx 3) (return -2))
+      (if (== test_idx 4) (return 1))))
+  (return 0))
+
+# Detect T-Spin using standard 3-corner rule
+(func detectTSpin (board px py p last_was_rot)
+  (if (!= p 3) (return 0)) # Must be T-piece
+  (if (!= last_was_rot 1) (return 0)) # Last movement was rotation
+  (let occ 0)
+  # Check 4 corners of 3x3 bounding box: (0,0), (2,0), (0,2), (2,2)
+  (let corners_x (list 0 2 0 2))
+  (let corners_y (list 0 0 2 2))
+  (let ci 0)
+  (while (< ci 4)
+    (let cx (+ px (get corners_x ci)))
+    (let cy (+ py (get corners_y ci)))
+    (if (or (or (< cx 0) (>= cx 10)) (>= cy 20))
+      (set! occ (+ occ 1))
+      (if (>= cy 0)
+        (if (!= (get board (+ (* cy 10) cx)) 0)
+          (set! occ (+ occ 1)))))
+    (set! ci (+ ci 1)))
+  (if (>= occ 3) (return 1))
+  (return 0))
+
+# Color lookup for pieces (1..7)
+(func getPieceColor (p)
+  (if (== p 1) (return (gfxRgb 0 230 255)))   # Cyan (I)
+  (if (== p 2) (return (gfxRgb 255 220 40)))  # Yellow (O)
+  (if (== p 3) (return (gfxRgb 185 75 255)))  # Purple (T)
+  (if (== p 4) (return (gfxRgb 50 240 100)))  # Green (S)
+  (if (== p 5) (return (gfxRgb 255 60 75)))   # Red (Z)
+  (if (== p 6) (return (gfxRgb 45 130 255)))  # Blue (J)
+  (if (== p 7) (return (gfxRgb 255 140 25)))  # Orange (L)
+  (return (gfxRgb 120 130 150)))
+
+# Light highlight color for bevelled rendering
+(func getPieceHighlight (p)
+  (if (== p 1) (return (gfxRgb 130 245 255)))
+  (if (== p 2) (return (gfxRgb 255 245 140)))
+  (if (== p 3) (return (gfxRgb 225 155 255)))
+  (if (== p 4) (return (gfxRgb 140 255 170)))
+  (if (== p 5) (return (gfxRgb 255 140 150)))
+  (if (== p 6) (return (gfxRgb 140 190 255)))
+  (if (== p 7) (return (gfxRgb 255 195 120)))
+  (return (gfxRgb 180 190 210)))
+
+# Dark shadow color for bevelled rendering
+(func getPieceShadow (p)
+  (if (== p 1) (return (gfxRgb 0 130 160)))
+  (if (== p 2) (return (gfxRgb 160 135 15)))
+  (if (== p 3) (return (gfxRgb 105 35 160)))
+  (if (== p 4) (return (gfxRgb 20 140 55)))
+  (if (== p 5) (return (gfxRgb 160 25 35)))
+  (if (== p 6) (return (gfxRgb 20 70 160)))
+  (if (== p 7) (return (gfxRgb 160 80 10)))
+  (return (gfxRgb 60 70 90)))
+
+# Draw a single 3D bevelled tetromino block
+(func drawBevelBlock (screen_x screen_y sz p)
+  (let base_col (call getPieceColor p))
+  (let hi_col (call getPieceHighlight p))
+  (let sh_col (call getPieceShadow p))
+  
+  # Fill center
+  (gfxDrawRect screen_x screen_y sz sz base_col 1)
+  # Top and Left highlights (2px)
+  (gfxDrawRect screen_x screen_y sz 2 hi_col 1)
+  (gfxDrawRect screen_x screen_y 2 sz hi_col 1)
+  # Bottom and Right shadows (2px)
+  (gfxDrawRect screen_x (+ screen_y (- sz 2)) sz 2 sh_col 1)
+  (gfxDrawRect (+ screen_x (- sz 2)) screen_y 2 sz sh_col 1)
+  # Outline border
+  (gfxDrawRect screen_x screen_y sz sz (gfxRgb 15 17 24) 0)
+  (return 0))
+
+# Test if piece fits at board position (px, py) with rotation rot
+(func pieceFits (board px py p rot)
+  (let bidx 0)
+  (while (< bidx 4)
+    (let rx (call getRotCoord p rot bidx 0))
+    (let ry (call getRotCoord p rot bidx 1))
+    (let gx (+ px rx))
+    (let gy (+ py ry))
+    
+    # Boundary checks: width 10, height 20
+    (if (< gx 0) (return 0))
+    (if (>= gx 10) (return 0))
+    (if (>= gy 20) (return 0))
+    
+    # If cell on board is within grid and occupied, collision!
+    (if (>= gy 0)
+      (block
+        (let cell_idx (+ (* gy 10) gx))
+        (let occ (get board cell_idx))
+        (if (!= occ 0) (return 0))))
+        
+    (set! bidx (+ bidx 1)))
+  (return 1))
+
+# Stamp piece into board grid
+(func lockPiece (board px py p rot)
+  (let bidx 0)
+  (while (< bidx 4)
+    (let rx (call getRotCoord p rot bidx 0))
+    (let ry (call getRotCoord p rot bidx 1))
+    (let gx (+ px rx))
+    (let gy (+ py ry))
+    (if (and (>= gx 0) (< gx 10))
+      (if (and (>= gy 0) (< gy 20))
+        (block
+          (let cell_idx (+ (* gy 10) gx))
+          (set_at board cell_idx p))))
+    (set! bidx (+ bidx 1)))
+  (return 0))
+
+# Clear complete rows and collapse downward, return number of cleared lines
+(func clearFullLines (board)
+  (let cleared 0)
+  (let row 19)
+  (while (>= row 0)
+    (let full 1)
+    (let col 0)
+    (while (< col 10)
+      (let val (get board (+ (* row 10) col)))
+      (if (== val 0) (set! full 0))
+      (set! col (+ col 1)))
+      
+    (if (== full 1)
+      (block
+        (set! cleared (+ cleared 1))
+        # Collapse all rows above downward
+        (let r row)
+        (while (> r 0)
+          (let c 0)
+          (while (< c 10)
+            (let above (get board (+ (* (- r 1) 10) c)))
+            (set_at board (+ (* r 10) c) above)
+            (set! c (+ c 1)))
+          (set! r (- r 1)))
+        # Clear top row
+        (let tc 0)
+        (while (< tc 10)
+          (set_at board tc 0)
+          (set! tc (+ tc 1))))
+      # Only advance to row above if current row wasn't cleared
+      (set! row (- row 1))))
+  (return cleared))
+
+# Find ghost piece landing Y coordinate
+(func getGhostY (board px py p rot)
+  (let gy py)
+  (while (== (call pieceFits board px (+ gy 1) p rot) 1)
+    (set! gy (+ gy 1)))
+  (return gy))
+
+# Draw mini preview of piece in preview slot
+(func drawMiniPiece (p center_x center_y)
+  (if (== p 0) (return 0))
+  (let bidx 0)
+  (while (< bidx 4)
+    (let rx (call getRotCoord p 0 bidx 0))
+    (let ry (call getRotCoord p 0 bidx 1))
+    # Offset coordinates so piece is centered
+    (let ox (- rx 1))
+    (let oy (- ry 1))
+    (if (== p 1) (set! ox (- rx 1.5))) # I piece centering
+    (let bx (+ center_x (* ox 14)))
+    (let by (+ center_y (* oy 14)))
+    (call drawBevelBlock bx by 13 p)
+    (set! bidx (+ bidx 1)))
+  (return 0))
+
+# Startup Self-Check Verification
+(func selfCheck ()
+  (call print "[Self-Check] Initializing Aether Blocks verification suite...")
+  
+  # 1. Verify rotation identity (4 x 90 deg clockwise == original)
+  (let p 1)
+  (while (<= p 7)
+    (let b 0)
+    (while (< b 4)
+      (let x0 (call getRotCoord p 0 b 0))
+      (let y0 (call getRotCoord p 0 b 1))
+      (let x4 (call getRotCoord p 4 b 0))
+      (let y4 (call getRotCoord p 4 b 1))
+      (if (or (!= x0 x4) (!= y0 y4))
+        (block
+          (call print "Error: Rotation identity failure on piece" p "block" b)
+          (return 1)))
+      (set! b (+ b 1)))
+    (set! p (+ p 1)))
+    
+  # 2. Verify line clearing on 10x20 board
+  (let test_board (list))
+  (let i 0)
+  (while (< i 200)
+    (append test_board 0)
+    (set! i (+ i 1)))
+    
+  # Fill bottom row completely
+  (let c 0)
+  (while (< c 10)
+    (set_at test_board (+ 190 c) 1)
+    (set! c (+ c 1)))
+    
+  (let cl (call clearFullLines test_board))
+  (if (!= cl 1)
+    (block
+      (call print "Error: Line clearing test failed, cleared:" cl)
+      (return 2)))
+      
+  # 3. Verify SRS kick table offsets
+  (let ik1 (call getSrsKickX 1 0 1 1))
+  (let tk1 (call getSrsKickX 3 0 1 1))
+  (if (or (!= ik1 -2) (!= tk1 -1))
+    (block
+      (call print "Error: SRS kick table verification failed" ik1 tk1)
+      (return 3)))
+      
+  # 4. Verify T-Spin 3-corner detection
+  (let tboard (list))
+  (let ti 0)
+  (while (< ti 200)
+    (append tboard 0)
+    (set! ti (+ ti 1)))
+  # Place 3 blocks at corners around (3, 10): (3,10), (5,10), (3,12)
+  (set_at tboard (+ (* 10 10) 3) 1)
+  (set_at tboard (+ (* 10 10) 5) 1)
+  (set_at tboard (+ (* 12 10) 3) 1)
+  (let tsp (call detectTSpin tboard 3 10 3 1))
+  (if (!= tsp 1)
+    (block
+      (call print "Error: T-Spin detection failed")
+      (return 4)))
+      
+  (call print "[Self-Check] Aether Blocks core mechanics verified: OK.\n")
+  (return 0))
+
+# Main Game Loop Entry Point
+(func main ()
+  (call print "=========================================================")
+  (call print "             AETHER BLOCKS: ARCADE PUZZLER               ")
+  (call print "=========================================================")
+  
+  # Execute startup self-check
+  (let sc (call selfCheck))
+  (if (!= sc 0)
+    (block
+      (call print "Fatal: Self-check failed with code" sc)
+      (return 1)))
+      
+  # Initialize Window: 400x440 resolution, window mode
+  (let ok (gfxInit 400 440 "Aether Blocks" "window" 1))
+  
+  # Initialize 10x20 Board
+  (let board (list))
+  (let cell_idx 0)
+  (while (< cell_idx 200)
+    (append board 0)
+    (set! cell_idx (+ cell_idx 1)))
+    
+  # Load Best Score from save file
+  (let best_score 0)
+  (let save_path "aether_blocks.save")
+  (if (file_exists save_path)
+    (block
+      (let content (file_read_str save_path))
+      (set! best_score (str_to_num content))
+      (call print "Loaded high score from save:" best_score)))
+      
+  # Music Soundtracks: Catchy 8-bit chiptune theme in A-minor
+  # Lead synth track
+  (let track_lead (list 69 72 76 72 74 71 69 0 67 71 74 71 72 69 67 0
+                        69 72 76 72 74 71 69 0 71 72 74 76 74 72 71 69))
+  # Driving bassline track
+  (let track_bass (list 45 -1 45 -1 41 -1 41 -1 43 -1 43 -1 45 -1 45 -1
+                        45 -1 45 -1 41 -1 41 -1 43 -1 43 -1 45 47 48 50))
+  (audio_music_play (list track_lead track_bass) 150)
+  (audio_volume 0.8)
+  
+  # Game State: 0 = Title, 1 = Playing, 2 = Paused, 3 = Game Over
+  (let state 0)
+  (let score 0)
+  (let lines 0)
+  (let level 1)
+  (let muted 0)
+  (let quad_banner_timer 0.0)
+  
+  # Active piece state
+  (let cur_p 1)
+  (let cur_x 3)
+  (let cur_y 0)
+  (let cur_rot 0)
+  (let hold_p 0)
+  (let hold_used 0)
+  (let last_was_rot 0)
+  
+  # 7-bag randomizer and Next queue (3 slots)
+  (let bag (list 1 2 3 4 5 6 7))
+  (let bag_idx 0)
+  (let next1 3)
+  (let next2 4)
+  (let next3 6)
+  
+  # Physics & timers
+  (let gravity_timer 0.0)
+  (let lock_timer 0.0)
+  (let is_on_ground 0)
+  (let das_dir 0)
+  (let das_timer 0.0)
+  (let seed_clock 100.0)
+  
+  (call print "Engine window initialized! Ready to play.\n")
+  
+  (while (not (gameShouldClose))
+    (gamePoll)
+    (let dt (gameDt))
+    (set! seed_clock (+ seed_clock (* dt 1000.0)))
+    
+    # Global audio mute toggle (Key 'M' = 77)
+    (if (gameIsKeyPressed 77)
+      (block
+        (if (== muted 0)
+          (block
+            (set! muted 1)
+            (audio_volume 0.0))
+          (block
+            (set! muted 0)
+            (audio_volume 0.8)))))
+            
+    # =========================================================================
+    # STATE 0: TITLE SCREEN
+    # =========================================================================
+    (if (== state 0)
+      (block
+        # Key Enter (13) starts game
+        (if (gameIsKeyPressed 13)
+          (block
+            (replay_init seed_clock)
+            (set! state 1)
+            (set! score 0)
+            (set! lines 0)
+            (set! level 1)
+            (set! hold_p 0)
+            (set! hold_used 0)
+            
+            # Clear board
+            (let ci 0)
+            (while (< ci 200)
+              (set_at board ci 0)
+              (set! ci (+ ci 1)))
+              
+            # Spawn initial piece
+            (set! cur_p (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! next1 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! next2 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! next3 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! cur_x 3)
+            (set! cur_y 0)
+            (set! cur_rot 0)
+            (audioPlayJump)))))
+            
+    # =========================================================================
+    # STATE 1: ACTIVE GAMEPLAY
+    # =========================================================================
+    (if (== state 1)
+      (block
+        # Pause Toggle (Key 'P' = 80)
+        (if (gameIsKeyPressed 80)
+          (block
+            (set! state 2)
+            (audio_music_stop)))
+            
+        # ---------------------------------------------------------------------
+        # Player Movement & Rotation Inputs
+        # ---------------------------------------------------------------------
+        (let moved 0)
+        (let rotated 0)
+        
+        # Left (Key 37 / Key 'A' 65)
+        (let key_left (or (gameIsKeyPressed 37) (gameIsKeyPressed 65)))
+        (let down_left (or (gameIsKeyDown 37) (gameIsKeyDown 65)))
+        
+        # Right (Key 39 / Key 'D' 68)
+        (let key_right (or (gameIsKeyPressed 39) (gameIsKeyPressed 68)))
+        (let down_right (or (gameIsKeyDown 39) (gameIsKeyDown 68)))
+        
+        # Soft Drop (Key 40 / Key 'S' 83)
+        (let down_drop (or (gameIsKeyDown 40) (gameIsKeyDown 83)))
+        
+        # Hard Drop (Space = 32)
+        (let key_hard_drop (gameIsKeyPressed 32))
+        
+        # Rotate CW (Key 38 / 'W' 87 / 'X' 88)
+        (let key_rot_cw (or (or (gameIsKeyPressed 38) (gameIsKeyPressed 87)) (gameIsKeyPressed 88)))
+        
+        # Rotate CCW (Key 'Z' = 90)
+        (let key_rot_ccw (gameIsKeyPressed 90))
+        
+        # Hold Piece (Key 'C' = 67)
+        (let key_hold (gameIsKeyPressed 67))
+        
+        # Handle Hold
+        (if (and key_hold (== hold_used 0))
+          (block
+            (set! hold_used 1)
+            (let prev_hold hold_p)
+            (set! hold_p cur_p)
+            (if (== prev_hold 0)
+              (block
+                (set! cur_p next1)
+                (set! next1 next2)
+                (set! next2 next3)
+                (set! next3 (+ 1 (% (floor (replay_rand 0 7)) 7))))
+              (set! cur_p prev_hold))
+            (set! cur_x 3)
+            (set! cur_y 0)
+            (set! cur_rot 0)
+            (audioPlayTone 520 25)))
+            
+        # DAS (Delayed Auto Shift) Movement
+        (if key_left
+          (block
+            (if (== (call pieceFits board (- cur_x 1) cur_y cur_p cur_rot) 1)
+              (block
+                (set! cur_x (- cur_x 1))
+                (set! moved 1)
+                (audioPlayTone 400 15)))
+            (set! das_dir -1)
+            (set! das_timer 0.17)))
+            
+        (if key_right
+          (block
+            (if (== (call pieceFits board (+ cur_x 1) cur_y cur_p cur_rot) 1)
+              (block
+                (set! cur_x (+ cur_x 1))
+                (set! moved 1)
+                (audioPlayTone 400 15)))
+            (set! das_dir 1)
+            (set! das_timer 0.17)))
+            
+        (if (and (== das_dir -1) down_left)
+          (block
+            (set! das_timer (- das_timer dt))
+            (if (<= das_timer 0.0)
+              (block
+                (if (== (call pieceFits board (- cur_x 1) cur_y cur_p cur_rot) 1)
+                  (block
+                    (set! cur_x (- cur_x 1))
+                    (set! moved 1)
+                    (audioPlayTone 400 12)))
+                (set! das_timer 0.05)))))
+                
+        (if (and (== das_dir 1) down_right)
+          (block
+            (set! das_timer (- das_timer dt))
+            (if (<= das_timer 0.0)
+              (block
+                (if (== (call pieceFits board (+ cur_x 1) cur_y cur_p cur_rot) 1)
+                  (block
+                    (set! cur_x (+ cur_x 1))
+                    (set! moved 1)
+                    (audioPlayTone 400 12)))
+                (set! das_timer 0.05)))))
+                
+        (if (not (or down_left down_right))
+          (set! das_dir 0))
+          
+        # Rotate CW with 5-test SRS Kick Table Recovery
+        (if key_rot_cw
+          (block
+            (let target_rot (% (+ cur_rot 1) 4))
+            (let kick_applied 0)
+            (let test_idx 0)
+            (while (and (== kick_applied 0) (< test_idx 5))
+              (let kx (call getSrsKickX cur_p cur_rot target_rot test_idx))
+              (let ky (call getSrsKickY cur_p cur_rot target_rot test_idx))
+              (if (== (call pieceFits board (+ cur_x kx) (+ cur_y ky) cur_p target_rot) 1)
+                (block
+                  (set! cur_x (+ cur_x kx))
+                  (set! cur_y (+ cur_y ky))
+                  (set! cur_rot target_rot)
+                  (set! kick_applied 1)))
+              (set! test_idx (+ test_idx 1)))
+              
+            (if (== kick_applied 1)
+              (block
+                (set! rotated 1)
+                (set! last_was_rot 1)
+                (audioPlayTone 620 20)))))
+                
+        # Rotate CCW with 5-test SRS Kick Table Recovery
+        (if key_rot_ccw
+          (block
+            (let target_rot (% (+ cur_rot 3) 4))
+            (let kick_applied 0)
+            (let test_idx 0)
+            (while (and (== kick_applied 0) (< test_idx 5))
+              (let kx (call getSrsKickX cur_p cur_rot target_rot test_idx))
+              (let ky (call getSrsKickY cur_p cur_rot target_rot test_idx))
+              (if (== (call pieceFits board (+ cur_x kx) (+ cur_y ky) cur_p target_rot) 1)
+                (block
+                  (set! cur_x (+ cur_x kx))
+                  (set! cur_y (+ cur_y ky))
+                  (set! cur_rot target_rot)
+                  (set! kick_applied 1)))
+              (set! test_idx (+ test_idx 1)))
+              
+            (if (== kick_applied 1)
+              (block
+                (set! rotated 1)
+                (set! last_was_rot 1)
+                (audioPlayTone 560 20)))))
+                
+        # Reset last_was_rot if moved laterally
+        (if (== moved 1) (set! last_was_rot 0))
+
+        # Hard Drop Instant Slam
+        (if key_hard_drop
+          (block
+            (let gy (call getGhostY board cur_x cur_y cur_p cur_rot))
+            (let drop_dist (- gy cur_y))
+            (set! score (+ score (* drop_dist 2)))
+            (set! cur_y gy)
+            (let is_tspin (call detectTSpin board cur_x cur_y cur_p last_was_rot))
+            (call lockPiece board cur_x cur_y cur_p cur_rot)
+            (audioPlayTone 220 30)
+            
+            # Particle burst on slam
+            (let bx (+ 20 (* (+ cur_x 1) 18)))
+            (let by (+ 44 (* (+ cur_y 1) 18)))
+            (engineBurstParticles bx by (call getPieceColor cur_p) 18)
+            
+            # Check line clears immediately
+            (let cleared (call clearFullLines board))
+            (if (== is_tspin 1)
+              (block
+                (if (== cleared 0) (set! score (+ score (* 100 level))))
+                (if (== cleared 1) (set! score (+ score (* 800 level))))
+                (if (== cleared 2) (set! score (+ score (* 1200 level))))
+                (if (== cleared 3) (set! score (+ score (* 1600 level))))
+                (set! quad_banner_timer 1.5)
+                (engineBurstParticles 110 220 (gfxRgb 255 120 220) 35)
+                (audioPlayLaser)))
+            (if (> cleared 0)
+              (block
+                (set! lines (+ lines cleared))
+                (set! level (+ 1 (floor (/ lines 10))))
+                (if (== cleared 1) (set! score (+ score (* 100 level))))
+                (if (== cleared 2) (set! score (+ score (* 300 level))))
+                (if (== cleared 3) (set! score (+ score (* 500 level))))
+                (if (== cleared 4)
+                  (block
+                    (set! score (+ score (* 800 level)))
+                    (set! quad_banner_timer 1.5)
+                    (audioPlayLaser)
+                    (engineBurstParticles 110 220 (gfxRgb 255 240 60) 45)))
+                (audioPlayTone (+ 440 (* cleared 120)) 60)))
+                
+            # Spawn next piece
+            (set! cur_p next1)
+            (set! next1 next2)
+            (set! next2 next3)
+            (set! next3 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! cur_x 3)
+            (set! cur_y 0)
+            (set! cur_rot 0)
+            (set! hold_used 0)
+            (set! lock_timer 0.0)
+            (set! gravity_timer 0.0)
+            
+            # Check Game Over condition upon spawn
+            (if (== (call pieceFits board cur_x cur_y cur_p cur_rot) 0)
+              (block
+                (set! state 3)
+                (audioPlayExplosion)
+                (audio_music_stop)
+                (if (> score best_score)
+                  (block
+                    (set! best_score score)
+                    (file_write_str save_path (str_join (list best_score) ""))))))))
+                    
+        # ---------------------------------------------------------------------
+        # Gravity & Lock Delay
+        # ---------------------------------------------------------------------
+        # Calculate gravity speed based on level (starts at 0.8s, floors at 0.08s)
+        (let max_grav (- 0.8 (* (- level 1) 0.07)))
+        (if (< max_grav 0.08) (set! max_grav 0.08))
+        (if down_drop (set! max_grav 0.04)) # Soft drop speed
+        
+        (set! gravity_timer (+ gravity_timer dt))
+        (if (>= gravity_timer max_grav)
+          (block
+            (set! gravity_timer 0.0)
+            (if (== (call pieceFits board cur_x (+ cur_y 1) cur_p cur_rot) 1)
+              (block
+                (set! cur_y (+ cur_y 1))
+                (if down_drop (set! score (+ score 1))))
+              (set! is_on_ground 1))))
+              
+        # Check if piece is resting on ground or blocks
+        (if (== (call pieceFits board cur_x (+ cur_y 1) cur_p cur_rot) 0)
+          (block
+            (set! is_on_ground 1)
+            # Reset lock delay if piece moved or rotated
+            (if (or (== moved 1) (== rotated 1))
+              (set! lock_timer 0.0))
+            (set! lock_timer (+ lock_timer dt))
+            (if (>= lock_timer 0.5) # 0.5 second lock delay
+              (block
+                (let is_tspin (call detectTSpin board cur_x cur_y cur_p last_was_rot))
+                (call lockPiece board cur_x cur_y cur_p cur_rot)
+                (audioPlayTone 280 25)
+                
+                # Check line clears
+                (let cl (call clearFullLines board))
+                (if (== is_tspin 1)
+                  (block
+                    (if (== cl 0) (set! score (+ score (* 100 level))))
+                    (if (== cl 1) (set! score (+ score (* 800 level))))
+                    (if (== cl 2) (set! score (+ score (* 1200 level))))
+                    (if (== cl 3) (set! score (+ score (* 1600 level))))
+                    (set! quad_banner_timer 1.5)
+                    (engineBurstParticles 110 220 (gfxRgb 255 120 220) 35)
+                    (audioPlayLaser)))
+                (if (> cl 0)
+                  (block
+                    (set! lines (+ lines cl))
+                    (set! level (+ 1 (floor (/ lines 10))))
+                    (if (== cl 1) (set! score (+ score (* 100 level))))
+                    (if (== cl 2) (set! score (+ score (* 300 level))))
+                    (if (== cl 3) (set! score (+ score (* 500 level))))
+                    (if (== cl 4)
+                      (block
+                        (set! score (+ score (* 800 level)))
+                        (set! quad_banner_timer 1.5)
+                        (audioPlayLaser)
+                        (engineBurstParticles 110 220 (gfxRgb 255 240 60) 45)))
+                    (audioPlayTone (+ 440 (* cl 120)) 60)))
+                    
+                # Spawn next
+                (set! cur_p next1)
+                (set! next1 next2)
+                (set! next2 next3)
+                (set! next3 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+                (set! cur_x 3)
+                (set! cur_y 0)
+                (set! cur_rot 0)
+                (set! hold_used 0)
+                (set! lock_timer 0.0)
+                
+                # Spawn blocked -> Game Over
+                (if (== (call pieceFits board cur_x cur_y cur_p cur_rot) 0)
+                  (block
+                    (set! state 3)
+                    (audioPlayExplosion)
+                    (audio_music_stop)
+                    (if (> score best_score)
+                      (block
+                        (set! best_score score)
+                        (file_write_str save_path (str_join (list best_score) "")))))))))
+          (block
+            (set! is_on_ground 0)
+            (set! lock_timer 0.0)))))
+            
+    # =========================================================================
+    # STATE 2: PAUSED
+    # =========================================================================
+    (if (== state 2)
+      (block
+        (if (gameIsKeyPressed 80) # Key 'P' resumes
+          (block
+            (set! state 1)
+            (audio_music_play (list track_lead track_bass) 150)))))
+            
+    # =========================================================================
+    # STATE 3: GAME OVER
+    # =========================================================================
+    (if (== state 3)
+      (block
+        (if (gameIsKeyPressed 13) # Enter restarts
+          (block
+            (set! state 1)
+            (set! score 0)
+            (set! lines 0)
+            (set! level 1)
+            (set! hold_p 0)
+            (set! hold_used 0)
+            (let ci 0)
+            (while (< ci 200)
+              (set_at board ci 0)
+              (set! ci (+ ci 1)))
+            (set! cur_p (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! next1 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! next2 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! next3 (+ 1 (% (floor (replay_rand 0 7)) 7)))
+            (set! cur_x 3)
+            (set! cur_y 0)
+            (set! cur_rot 0)
+            (audio_music_play (list track_lead track_bass) 150)))))
+
+    # =========================================================================
+    # GRAPHICS RENDERING
+    # =========================================================================
+    # Clear screen with sleek obsidian dark slate
+    (gfxClear (gfxRgb 16 18 26))
+    
+    # -------------------------------------------------------------------------
+    # Draw Left 10x20 Board Frame (x: 20..200, y: 44..404)
+    # -------------------------------------------------------------------------
+    # Board dark tile background
+    (gfxDrawRect 20 44 180 360 (gfxRgb 22 25 36) 1)
+    
+    # Board grid cell outlines
+    (let r 0)
+    (while (< r 20)
+      (let c 0)
+      (while (< c 10)
+        (let bx (+ 20 (* c 18)))
+        (let by (+ 44 (* r 18)))
+        (gfxDrawRect bx by 18 18 (gfxRgb 28 32 46) 0)
+        
+        # Draw locked blocks
+        (let val (get board (+ (* r 10) c)))
+        (if (> val 0)
+          (call drawBevelBlock bx by 18 val))
+          
+        (set! c (+ c 1)))
+      (set! r (+ r 1)))
+      
+    # Outer board luminous border
+    (gfxDrawRect 19 43 182 362 (gfxRgb 60 72 105) 0)
+    
+    # -------------------------------------------------------------------------
+    # Draw Ghost Piece & Active Piece (when playing or paused)
+    # -------------------------------------------------------------------------
+    (if (or (== state 1) (== state 2))
+      (block
+        # 1. Ghost piece landing projection
+        (let gy (call getGhostY board cur_x cur_y cur_p cur_rot))
+        (let gb 0)
+        (while (< gb 4)
+          (let grx (call getRotCoord cur_p cur_rot gb 0))
+          (let gry (call getRotCoord cur_p cur_rot gb 1))
+          (let gbx (+ 20 (* (+ cur_x grx) 18)))
+          (let gby (+ 44 (* (+ gy gry) 18)))
+          (gfxDrawRect (+ gbx 1) (+ gby 1) 16 16 (gfxRgb 55 65 90) 0)
+          (set! gb (+ gb 1)))
+          
+        # 2. Active falling piece with bevelled styling
+        (let b 0)
+        (while (< b 4)
+          (let rx (call getRotCoord cur_p cur_rot b 0))
+          (let ry (call getRotCoord cur_p cur_rot b 1))
+          (let screen_bx (+ 20 (* (+ cur_x rx) 18)))
+          (let screen_by (+ 44 (* (+ cur_y ry) 18)))
+          (if (>= (+ cur_y ry) 0)
+            (call drawBevelBlock screen_bx screen_by 18 cur_p))
+          (set! b (+ b 1)))))
+          
+    # -------------------------------------------------------------------------
+    # Right Side HUD & Panels (x: 216..384)
+    # -------------------------------------------------------------------------
+    # Title Header
+    (gfxDrawText 20 18 "AETHER BLOCKS" (gfxRgb 0 230 255))
+    (gfxDrawText 216 18 "ARCADE v1.0" (gfxRgb 140 150 180))
+    
+    # HOLD Panel
+    (gfxDrawRect 216 44 76 68 (gfxRgb 24 28 40) 1)
+    (gfxDrawRect 216 44 76 68 (gfxRgb 55 65 95) 0)
+    (gfxDrawText 234 50 "HOLD" (gfxRgb 180 190 220))
+    (if (> hold_p 0)
+      (call drawMiniPiece hold_p 254 84))
+      
+    # NEXT Panel (3 pieces queue)
+    (gfxDrawRect 304 44 76 180 (gfxRgb 24 28 40) 1)
+    (gfxDrawRect 304 44 76 180 (gfxRgb 55 65 95) 0)
+    (gfxDrawText 324 50 "NEXT" (gfxRgb 180 190 220))
+    (call drawMiniPiece next1 342 84)
+    (call drawMiniPiece next2 342 136)
+    (call drawMiniPiece next3 342 188)
+    
+    # STATS Panel
+    (gfxDrawRect 216 122 76 102 (gfxRgb 24 28 40) 1)
+    (gfxDrawRect 216 122 76 102 (gfxRgb 55 65 95) 0)
+    (gfxDrawText 224 130 "SCORE" (gfxRgb 140 155 185))
+    (gfxDrawText 224 144 (str_join (list score) "") (gfxRgb 255 240 100))
+    
+    (gfxDrawText 224 162 "LEVEL" (gfxRgb 140 155 185))
+    (gfxDrawText 224 176 (str_join (list level) "") (gfxRgb 50 240 120))
+    
+    (gfxDrawText 224 194 "LINES" (gfxRgb 140 155 185))
+    (gfxDrawText 224 208 (str_join (list lines) "") (gfxRgb 0 230 255))
+    
+    # BEST SCORE Panel
+    (gfxDrawRect 216 234 164 42 (gfxRgb 24 28 40) 1)
+    (gfxDrawRect 216 234 164 42 (gfxRgb 55 65 95) 0)
+    (gfxDrawText 226 242 "BEST RECORD" (gfxRgb 255 180 50))
+    (gfxDrawText 226 258 (str_join (list best_score) "") (gfxRgb 255 255 255))
+    
+    # CONTROLS Legend Box
+    (gfxDrawRect 216 286 164 118 (gfxRgb 20 23 33) 1)
+    (gfxDrawRect 216 286 164 118 (gfxRgb 45 52 75) 0)
+    (gfxDrawText 224 294 "CONTROLS" (gfxRgb 150 165 195))
+    (gfxDrawText 224 310 "<- / -> : Move" (gfxRgb 180 190 215))
+    (gfxDrawText 224 324 "^ / Z / X: Rotate" (gfxRgb 180 190 215))
+    (gfxDrawText 224 338 "SPACE : Hard Drop" (gfxRgb 180 190 215))
+    (gfxDrawText 224 352 "C : Hold  P : Pause" (gfxRgb 180 190 215))
+    (if (== muted 0)
+      (gfxDrawText 224 366 "M : Mute (ON)" (gfxRgb 60 220 120))
+      (gfxDrawText 224 366 "M : Mute (OFF)" (gfxRgb 240 70 80)))
+    (gfxDrawText 224 380 "ESC : Exit Game" (gfxRgb 140 150 170))
+    
+    # -------------------------------------------------------------------------
+    # Celebratory "QUAD!" Clear Banner
+    # -------------------------------------------------------------------------
+    (if (> quad_banner_timer 0.0)
+      (block
+        (set! quad_banner_timer (- quad_banner_timer dt))
+        (gfxDrawRect 30 190 160 36 (gfxRgb 255 220 0) 1)
+        (gfxDrawRect 30 190 160 36 (gfxRgb 255 255 255) 0)
+        (gfxDrawText 76 202 "QUAD! +800" (gfxRgb 20 20 20))))
+        
+    # -------------------------------------------------------------------------
+    # Overlay Overlays for Non-Playing States
+    # -------------------------------------------------------------------------
+    # TITLE OVERLAY
+    (if (== state 0)
+      (block
+        (gfxDrawRect 24 140 172 130 (gfxRgb 18 20 30) 1)
+        (gfxDrawRect 24 140 172 130 (gfxRgb 0 220 255) 0)
+        (gfxDrawText 56 160 "AETHER BLOCKS" (gfxRgb 0 240 255))
+        (gfxDrawText 42 195 "PRESS ENTER TO PLAY" (gfxRgb 255 240 100))
+        (gfxDrawText 52 225 "7-BAG RANDOMIZER" (gfxRgb 160 175 205))
+        (gfxDrawText 54 240 "PURE AETHER ENGINE" (gfxRgb 130 145 175))))
+        
+    # PAUSE OVERLAY
+    (if (== state 2)
+      (block
+        (gfxDrawRect 36 180 148 54 (gfxRgb 18 20 30) 1)
+        (gfxDrawRect 36 180 148 54 (gfxRgb 255 200 40) 0)
+        (gfxDrawText 86 194 "PAUSED" (gfxRgb 255 210 50))
+        (gfxDrawText 50 212 "PRESS P TO RESUME" (gfxRgb 220 230 250))))
+        
+    # GAME OVER OVERLAY
+    (if (== state 3)
+      (block
+        (gfxDrawRect 28 150 164 96 (gfxRgb 24 18 24) 1)
+        (gfxDrawRect 28 150 164 96 (gfxRgb 255 50 70) 0)
+        (gfxDrawText 70 166 "GAME OVER" (gfxRgb 255 60 80))
+        (gfxDrawText 48 190 "FINAL SCORE:" (gfxRgb 200 210 230))
+        (gfxDrawText 134 190 (str_join (list score) "") (gfxRgb 255 240 80))
+        (gfxDrawText 42 216 "PRESS ENTER TO RETRY" (gfxRgb 160 230 255))))
+        
+    # Present frame (updates particle system & flips front buffer)
+    (gamePresent))
+    
+  (call print "Aether Blocks closed cleanly.")
+  (return 0))
+

@@ -1,0 +1,85 @@
+# ==============================================================================
+# App 4: Autonomous Infrastructure Diagnostic & Triage Expert System
+# Demonstrates: Algebraic Pattern Matching (match), Multi-Branch Logic,
+#               Conditional Rule Engines & Status Code Triage.
+# ==============================================================================
+
+(func diagnose_cluster_node (node_id temp_c mem_pct latency_ms)
+  (call print "Auditing Node" node_id "-> Temp:" temp_c "C | Mem:" mem_pct "% | Latency:" latency_ms "ms")
+  
+  # Rule 1: Thermal Overheat Triage
+  (let thermal_tier (match temp_c
+    (95 "THERMAL_SHUTDOWN")
+    (85 "THERMAL_THROTTLE")
+    (_ "THERMAL_OK")))
+
+  # If high temperature, check emergency override
+  (if (>= temp_c 90)
+    (return "ACTION: EMERGENCY_COOLING_AND_DRAIN"))
+
+  # Rule 2: Memory Saturation Triage
+  (if (>= mem_pct 95)
+    (return "ACTION: RESTART_OOM_POD"))
+
+  # Rule 3: Network Congestion & High Latency Triage
+  (if (>= latency_ms 500)
+    (return "ACTION: REROUTE_EDGE_TRAFFIC"))
+
+  # Rule 4: Moderate Load Warning
+  (if (>= mem_pct 80)
+    (return "ACTION: SCALE_OUT_REPLICAS"))
+
+  # Default Health Status
+  (return "ACTION: STATUS_NOMINAL"))
+
+(func classify_error_code (err_code)
+  (let action (match err_code
+    (200 "HTTP_OK: Healthy service response")
+    (400 "CLIENT_ERR: Malformed inference payload")
+    (404 "NOT_FOUND: Model checkpoint missing")
+    (429 "RATE_LIMITED: Token quota exhausted; backoff")
+    (500 "INTERNAL_ERR: Kernel fault on compute worker")
+    (503 "UNAVAILABLE: Inference cluster offline")
+    (_ "UNKNOWN_STATUS: Trigger manual SRE review")))
+  (return action))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "     AETHER EXPERT SYSTEM: INFRASTRUCTURE DIAGNOSTICS    ")
+  (call print "=========================================================")
+
+  # Scenario 1: Node 1 (Nominal health)
+  (let a1 (call diagnose_cluster_node 1 55 42 18))
+  (call print "  Diagnosis: " a1)
+  (call print "---------------------------------------------------------")
+
+  # Scenario 2: Node 2 (Thermal warning)
+  (let a2 (call diagnose_cluster_node 2 92 60 45))
+  (call print "  Diagnosis: " a2)
+  (call print "---------------------------------------------------------")
+
+  # Scenario 3: Node 3 (Memory exhaustion)
+  (let a3 (call diagnose_cluster_node 3 70 98 120))
+  (call print "  Diagnosis: " a3)
+  (call print "---------------------------------------------------------")
+
+  # Scenario 4: Node 4 (Network lag)
+  (let a4 (call diagnose_cluster_node 4 65 72 680))
+  (call print "  Diagnosis: " a4)
+  (call print "---------------------------------------------------------")
+
+  (call print "Testing Fast Pattern Matching on Service Status Codes:")
+  (let desc1 (call classify_error_code 200))
+  (let desc2 (call classify_error_code 429))
+  (let desc3 (call classify_error_code 500))
+  (let desc4 (call classify_error_code 999))
+  (call print "Code 200 ->" desc1)
+  (call print "Code 429 ->" desc2)
+  (call print "Code 500 ->" desc3)
+  (call print "Code 999 ->" desc4)
+
+  (call print "=========================================================")
+  (call print "       DIAGNOSTIC EXPERT SYSTEM COMPLETED SUCCESSFULLY   ")
+  (call print "=========================================================")
+  (return 0))
+

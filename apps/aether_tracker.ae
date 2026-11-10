@@ -1,0 +1,277 @@
+# ==============================================================================
+# AETHER TRACKER: 8-Channel Chiptune Music Sequencer & Studio
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func midiToHz (note)
+  # f = 440.0 * 2^((note - 69) / 12)
+  (let semitones (/ (- note 69.0) 12.0))
+  (let freq (* 440.0 (pow 2.0 semitones)))
+  (return freq))
+
+(func computeAdsr (t attack decay sustain release total_t)
+  (if (< t attack)
+    (return (/ t attack))
+    0)
+  (if (< t (+ attack decay))
+    (block
+      (let d_progress (/ (- t attack) decay))
+      (return (- 1.0 (* (- 1.0 sustain) d_progress))))
+    0)
+  (if (< t (- total_t release))
+    (return sustain)
+    0)
+  (let r_progress (/ (- t (- total_t release)) release))
+  (return (* sustain (- 1.0 r_progress))))
+
+(func selfCheck ()
+  (call print "=== Self Check: Aether Tracker ===")
+  # Test note 69 = A4 = 440.0 Hz
+  (let hz_a4 (call midiToHz 69.0))
+  (if (or (< hz_a4 439.9) (> hz_a4 440.1)) (return 0) 0)
+
+  # Test note 57 = A3 = 220.0 Hz
+  (let hz_a3 (call midiToHz 57.0))
+  (if (or (< hz_a3 219.9) (> hz_a3 220.1)) (return 0) 0)
+
+  # Test ADSR attack peak
+  (let env_peak (call computeAdsr 0.1 0.1 0.1 0.7 0.2 1.0))
+  (if (!= env_peak 1.0) (return 0) 0)
+
+  (call print "[Self-Check] MIDI tuning and ADSR envelope math verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       AETHER TRACKER: 8-CHANNEL CHIPTUNE SEQUENCER      ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  (let ok (gfxInit 560 420 "Aether Tracker: 8-Channel Sequencer" backend 1))
+  (call print "Aether Tracker initialized. Space: Play/Pause, 1..8: Mute Ch, Arrows: Navigate, ESC: Exit.")
+
+  # 16-Step Pattern for 4 main active channels (notes represented by MIDI numbers, 0 = rest)
+  # Ch 0: Lead Melody (Pulse 25%)
+  (let ch0_notes (list 60 0 64 0 67 0 71 0 72 0 71 0 67 0 64 0))
+  # Ch 1: Arpeggio (Pulse 50%)
+  (let ch1_notes (list 60 64 67 64 60 64 67 64 59 62 67 62 59 62 67 62))
+  # Ch 2: Bass (Triangle)
+  (let ch2_notes (list 36 0 0 0 36 0 0 0 35 0 0 0 35 0 0 0))
+  # Ch 3: Kick / Snare (Noise)
+  (let ch3_notes (list 1 0 2 0 1 0 2 0 1 0 2 0 1 0 2 0))
+
+  # Channel Mute flags (0 = active, 1 = muted)
+  (let mutes (list 0 0 0 0 0 0 0 0))
+
+  # Tracker State
+  (let is_playing 1)
+  (let current_step 0)
+  (let cursor_step 0)
+  (let cursor_ch 0)
+  (let bpm 130)
+  (let tick_accum 0)
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+
+    # Headless test completes in 40 frames
+    (if (and (== headless 1) (> frame 40))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # Space toggles playback (Key 32)
+    (if (gameIsKeyPressed 32)
+      (if (== is_playing 1) (set! is_playing 0) (set! is_playing 1))
+      0)
+
+    # Channel Mute Toggles (Keys 1..8 = 49..56)
+    (if (gameIsKeyPressed 49) (set_at mutes 0 (- 1 (get mutes 0))) 0)
+    (if (gameIsKeyPressed 50) (set_at mutes 1 (- 1 (get mutes 1))) 0)
+    (if (gameIsKeyPressed 51) (set_at mutes 2 (- 1 (get mutes 2))) 0)
+    (if (gameIsKeyPressed 52) (set_at mutes 3 (- 1 (get mutes 3))) 0)
+    (if (gameIsKeyPressed 53) (set_at mutes 4 (- 1 (get mutes 4))) 0)
+    (if (gameIsKeyPressed 54) (set_at mutes 5 (- 1 (get mutes 5))) 0)
+    (if (gameIsKeyPressed 55) (set_at mutes 6 (- 1 (get mutes 6))) 0)
+    (if (gameIsKeyPressed 56) (set_at mutes 7 (- 1 (get mutes 7))) 0)
+
+    # Cursor Navigation
+    (if (gameIsKeyPressed 38) # Up
+      (if (> cursor_step 0) (set! cursor_step (- cursor_step 1)) (set! cursor_step 15)) 0)
+    (if (gameIsKeyPressed 40) # Down
+      (if (< cursor_step 15) (set! cursor_step (+ cursor_step 1)) (set! cursor_step 0)) 0)
+    (if (gameIsKeyPressed 37) # Left
+      (if (> cursor_ch 0) (set! cursor_ch (- cursor_ch 1)) 0) 0)
+    (if (gameIsKeyPressed 39) # Right
+      (if (< cursor_ch 3) (set! cursor_ch (+ cursor_ch 1)) 0) 0)
+
+    # Live Keyboard Note Trigger (Piano Keys: Z=C4, S=C#4, X=D4, D=D#4, C=E4, V=F4, G=F#4, B=G4)
+    (let triggered_note 0)
+    (if (gameIsKeyPressed 90) (set! triggered_note 60) 0) # Z -> C4
+    (if (gameIsKeyPressed 88) (set! triggered_note 62) 0) # X -> D4
+    (if (gameIsKeyPressed 67) (set! triggered_note 64) 0) # C -> E4
+    (if (gameIsKeyPressed 86) (set! triggered_note 65) 0) # V -> F4
+    (if (gameIsKeyPressed 66) (set! triggered_note 67) 0) # B -> G4
+    (if (gameIsKeyPressed 78) (set! triggered_note 69) 0) # N -> A4
+    (if (gameIsKeyPressed 77) (set! triggered_note 71) 0) # M -> B4
+
+    (if (> triggered_note 0)
+      (block
+        (let note_hz (call midiToHz triggered_note))
+        (call audio.sfx_beep note_hz 0.12)
+        # Record into cursor position
+        (if (== cursor_ch 0) (set_at ch0_notes cursor_step triggered_note) 0)
+        (if (== cursor_ch 1) (set_at ch1_notes cursor_step triggered_note) 0)
+        (if (== cursor_ch 2) (set_at ch2_notes cursor_step triggered_note) 0))
+      0)
+
+    # Sequencer Step Playback (every 8 frames ~= 130 BPM sixteenth notes)
+    (if (== is_playing 1)
+      (block
+        (set! tick_accum (+ tick_accum 1))
+        (if (>= tick_accum 7)
+          (block
+            (set! tick_accum 0)
+            (set! current_step (% (+ current_step 1) 16))
+
+            # Play active channel notes
+            (if (== (get mutes 0) 0)
+              (block
+                (let n0 (get ch0_notes current_step))
+                (if (> n0 0)
+                  (call audio.sfx_beep (call midiToHz n0) 0.08)
+                  0))
+              0)
+            (if (== (get mutes 1) 0)
+              (block
+                (let n1 (get ch1_notes current_step))
+                (if (> n1 0)
+                  (call audio.sfx_beep (call midiToHz n1) 0.05)
+                  0))
+              0)
+            (if (== (get mutes 2) 0)
+              (block
+                (let n2 (get ch2_notes current_step))
+                (if (> n2 0)
+                  (call audio.sfx_beep (call midiToHz n2) 0.12)
+                  0))
+              0)
+            (if (== (get mutes 3) 0)
+              (block
+                (let n3 (get ch3_notes current_step))
+                (if (== n3 1) (call audio.sfx_beep 120.0 0.04) 0)
+                (if (== n3 2) (call audio.sfx_beep 480.0 0.03) 0))
+              0)))
+        0)
+      0)
+
+    # -------------------------------------------------------------------------
+    # RENDER TRACKER UI
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 18 20 30))
+
+    # Top Header
+    (gfxDrawRect 0 0 560 32 (gfxRgb 26 30 46) 1)
+    (gfxDrawText 16 8 "AETHER TRACKER v1.0" (gfxRgb 100 230 255))
+    (gfxDrawText 220 8 (str_join (list "BPM: " bpm " | 8 CHANNELS") "") (gfxRgb 255 230 80))
+    (if (== is_playing 1)
+      (gfxDrawText 450 8 "STATUS: PLAYING" (gfxRgb 60 255 120))
+      (gfxDrawText 450 8 "STATUS: STOPPED" (gfxRgb 255 80 90)))
+
+    # Channel Headers
+    (gfxDrawRect 16 40 528 24 (gfxRgb 24 28 42) 1)
+    (gfxDrawText 24 46 "STEP" (gfxRgb 140 160 190))
+    (gfxDrawText 80 46 "CH1:LEAD" (gfxRgb 80 220 255))
+    (gfxDrawText 180 46 "CH2:ARP" (gfxRgb 180 120 255))
+    (gfxDrawText 280 46 "CH3:BASS" (gfxRgb 255 180 60))
+    (gfxDrawText 380 46 "CH4:PERC" (gfxRgb 255 90 120))
+    (gfxDrawText 480 46 "MUTES" (gfxRgb 160 180 200))
+
+    # Pattern Step Rows (16 steps)
+    (let si 0)
+    (while (< si 16)
+      (let row_y (+ 70 (* si 18)))
+
+      # Highlight current playback step
+      (if (and (== is_playing 1) (== si current_step))
+        (gfxDrawRect 16 row_y 528 17 (gfxRgb 35 48 75) 1)
+        (if (== si cursor_step)
+          (gfxDrawRect 16 row_y 528 17 (gfxRgb 30 35 52) 1)
+          (gfxDrawRect 16 row_y 528 17 (gfxRgb 20 23 34) 1)))
+
+      # Step number (00..15)
+      (gfxDrawText 24 (+ row_y 2) (str_join (list si) "") (gfxRgb 140 150 170))
+
+      # Ch 1 note
+      (let n0_val (get ch0_notes si))
+      (if (> n0_val 0)
+        (gfxDrawText 80 (+ row_y 2) (str_join (list "NOTE:" n0_val) "") (gfxRgb 80 220 255))
+        (gfxDrawText 80 (+ row_y 2) "..." (gfxRgb 70 80 100)))
+
+      # Ch 2 note
+      (let n1_val (get ch1_notes si))
+      (if (> n1_val 0)
+        (gfxDrawText 180 (+ row_y 2) (str_join (list "NOTE:" n1_val) "") (gfxRgb 180 120 255))
+        (gfxDrawText 180 (+ row_y 2) "..." (gfxRgb 70 80 100)))
+
+      # Ch 3 note
+      (let n2_val (get ch2_notes si))
+      (if (> n2_val 0)
+        (gfxDrawText 280 (+ row_y 2) (str_join (list "BASS:" n2_val) "") (gfxRgb 255 180 60))
+        (gfxDrawText 280 (+ row_y 2) "..." (gfxRgb 70 80 100)))
+
+      # Ch 4 note
+      (let n3_val (get ch3_notes si))
+      (if (== n3_val 1) (gfxDrawText 380 (+ row_y 2) "KICK" (gfxRgb 255 100 120))
+        (if (== n3_val 2) (gfxDrawText 380 (+ row_y 2) "SNAR" (gfxRgb 255 150 170))
+          (gfxDrawText 380 (+ row_y 2) "..." (gfxRgb 70 80 100))))
+
+      (set! si (+ si 1)))
+
+    # Draw Mute indicators on the right
+    (let mi 0)
+    (while (< mi 4)
+      (let mx_col (+ 480 (* mi 14)))
+      (if (== (get mutes mi) 0)
+        (gfxDrawRect mx_col 72 10 286 (gfxRgb 50 200 90) 1)
+        (gfxDrawRect mx_col 72 10 286 (gfxRgb 200 50 60) 1))
+      (set! mi (+ mi 1)))
+
+    # Bottom Instructions Bar
+    (gfxDrawRect 0 370 560 50 (gfxRgb 22 25 38) 1)
+    (gfxDrawText 16 376 "CONTROLS: Space: Play/Pause | 1..4: Mute/Unmute | Arrows: Navigate" (gfxRgb 180 195 220))
+    (gfxDrawText 16 396 "PIANO KEYS: Z, X, C, V, B, N, M (Play & Record Notes into Pattern)" (gfxRgb 255 220 80))
+
+    (gamePresent))
+
+  (call print "Aether Tracker closed cleanly.")
+  (return 0))

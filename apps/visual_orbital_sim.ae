@@ -1,0 +1,221 @@
+# ==============================================================================
+# AETHER ORBITAL SIM: Full Interactive 2D Orbital Mechanics Sandbox
+# Written in pure Aether
+# ==============================================================================
+
+(func isHeadless ()
+  (let args (cli_args))
+  (let i 0)
+  (while (< i (length args))
+    (let a (get args i))
+    (if (or (== a "--test") (or (== a "--headless") (== a "--check")))
+      (return 1)
+      0)
+    (set! i (+ i 1)))
+  (return 0))
+
+(func computeGravityAccel (dx dy G M)
+  (let r_sq (+ (* dx dx) (* dy dy)))
+  (if (< r_sq 10.0) (set! r_sq 10.0) 0)
+  (let r (sqrt r_sq))
+  (let a_mag (/ (* G M) (* r_sq r)))
+  (return a_mag))
+
+(func selfCheck ()
+  (call print "=== Self Check: Visual Orbital Sim ===")
+  # Test gravity at distance 10.0 with G=1.0, M=1000.0: a = 1000 / 1000 = 1.0
+  (let a (call computeGravityAccel 10.0 0.0 1.0 1000.0))
+  (if (or (< a 0.99) (> a 1.01)) (return 0) 0)
+
+  (call print "[Self-Check] Newtonian orbital dynamics verified: OK.")
+  (return 1))
+
+(func main ()
+  (call print "=========================================================")
+  (call print "       AETHER VISUAL 2D ORBITAL MECHANICS SIMULATION     ")
+  (call print "=========================================================")
+
+  (let sc (call selfCheck))
+  (if (!= sc 1)
+    (block
+      (call print "Self-check FAILED!")
+      (return 1)))
+
+  (let headless (call isHeadless))
+  (let backend "window")
+  (if (== headless 1)
+    (set! backend "headless")
+    0)
+
+  # 560x420 window
+  (let ok (gfxInit 560 420 "Aether Orbital Mechanics Simulator" backend 1))
+  (call replay_init 42)
+  (call print "Orbital Simulator initialized. Arrows: Thrusters (Up: Prograde, Down: Retrograde), R: Reset, ESC: Exit.")
+
+  # Central Star at (280, 210)
+  (let sun_x 280.0)
+  (let sun_y 210.0)
+  (let G 1.0)
+  (let M 8000.0)
+  (let dt 0.12)
+
+  # Controllable Spacecraft Probe
+  (let px 280.0)
+  (let py 100.0) # r = 110.0
+  (let vx 8.5)
+  (let vy 0.0)
+
+  # Secondary Natural Planet (Cyan)
+  (let planet_x 280.0)
+  (let planet_y 40.0) # r = 170.0
+  (let planet_vx 6.86)
+  (let planet_vy 0.0)
+
+  # Orbit trail points for probe (last 20 positions)
+  (let trail_x (list))
+  (let trail_y (list))
+
+  (let frame 0)
+  (let running 1)
+  (while (and (== running 1) (not (gameShouldClose)))
+    (gamePoll)
+    (set! frame (+ frame 1))
+    (replay_step)
+
+    # Headless test completes in 40 frames
+    (if (and (== headless 1) (> frame 40))
+      (set! running 0)
+      0)
+
+    # ESC exits
+    (if (gameIsKeyPressed 27)
+      (set! running 0)
+      0)
+
+    # R resets orbit
+    (if (gameIsKeyPressed 82)
+      (block
+        (set! px 280.0) (set! py 100.0)
+        (set! vx 8.5) (set! vy 0.0)
+        (set! trail_x (list))
+        (set! trail_y (list))))
+
+    # -------------------------------------------------------------------------
+    # Spacecraft Thruster Controls
+    # -------------------------------------------------------------------------
+    # Up: Prograde burn (accelerate in direction of velocity)
+    (if (gameIsKeyDown 38)
+      (block
+        (let v_mag (sqrt (+ (* vx vx) (* vy vy))))
+        (if (> v_mag 0.1)
+          (do
+            (set! vx (+ vx (* (/ vx v_mag) 0.15)))
+            (set! vy (+ vy (* (/ vy v_mag) 0.15))))
+          0))
+      0)
+
+    # Down: Retrograde burn (brake)
+    (if (gameIsKeyDown 40)
+      (block
+        (let v_mag (sqrt (+ (* vx vx) (* vy vy))))
+        (if (> v_mag 0.1)
+          (do
+            (set! vx (- vx (* (/ vx v_mag) 0.15)))
+            (set! vy (- vy (* (/ vy v_mag) 0.15))))
+          0))
+      0)
+
+    # Left / Right: Radial burn
+    (if (gameIsKeyDown 37) (set! vx (- vx 0.1)) 0)
+    (if (gameIsKeyDown 39) (set! vx (+ vx 0.1)) 0)
+
+    # -------------------------------------------------------------------------
+    # Physics Integration (Verlet / Euler step)
+    # -------------------------------------------------------------------------
+    # 1. Probe Gravity
+    (let pdx (- sun_x px))
+    (let pdy (- sun_y py))
+    (let p_amag (call computeGravityAccel pdx pdy G M))
+    (set! vx (+ vx (* (* p_amag pdx) dt)))
+    (set! vy (+ vy (* (* p_amag pdy) dt)))
+    (set! px (+ px (* vx dt)))
+    (set! py (+ py (* vy dt)))
+
+    # Record trail
+    (if (== (% frame 3) 0)
+      (block
+        (append trail_x px)
+        (append trail_y py)
+        (if (> (length trail_x) 25)
+          (block
+            (set! trail_x (slice trail_x 1 26))
+            (set! trail_y (slice trail_y 1 26)))
+          0))
+      0)
+
+    # 2. Planet Gravity
+    (let cdx (- sun_x planet_x))
+    (let cdy (- sun_y planet_y))
+    (let c_amag (call computeGravityAccel cdx cdy G M))
+    (set! planet_vx (+ planet_vx (* (* c_amag cdx) dt)))
+    (set! planet_vy (+ planet_vy (* (* c_amag cdy) dt)))
+    (set! planet_x (+ planet_x (* planet_vx dt)))
+    (set! planet_y (+ planet_y (* planet_vy dt)))
+
+    # Snapshot into replay tape
+    (replay_snapshot px)
+
+    # Telemetry metrics
+    (let altitude (sqrt (+ (* pdx pdx) (* pdy pdy))))
+    (let speed (sqrt (+ (* vx vx) (* vy vy))))
+    (let orbital_energy (- (* 0.5 (* speed speed)) (/ (* G M) altitude)))
+
+    # -------------------------------------------------------------------------
+    # RENDER ORBITAL SANDBOX
+    # -------------------------------------------------------------------------
+    (gfxClear (gfxRgb 8 10 22))
+
+    # Starfield
+    (gfxDrawPixel 60 70 (gfxRgb 200 200 255))
+    (gfxDrawPixel 480 110 (gfxRgb 180 190 230))
+    (gfxDrawPixel 140 340 (gfxRgb 220 220 255))
+    (gfxDrawPixel 420 370 (gfxRgb 190 200 240))
+    (gfxDrawPixel 500 280 (gfxRgb 255 255 255))
+    (gfxDrawPixel 80 190 (gfxRgb 200 210 255))
+
+    # Draw Central Star (Golden Sun with outer corona)
+    (gfxDrawRect (- sun_x 16) (- sun_y 16) 32 32 (gfxRgb 255 180 30) 1)
+    (gfxDrawRect (- sun_x 12) (- sun_y 12) 24 24 (gfxRgb 255 230 60) 1)
+    (gfxDrawRect (- sun_x 6) (- sun_y 6) 12 12 (gfxRgb 255 255 220) 1)
+
+    # Draw Planet Orbit Trail (Cyan Natural Satellite)
+    (gfxDrawRect (- planet_x 5) (- planet_y 5) 10 10 (gfxRgb 50 220 255) 1)
+    (gfxDrawRect (- planet_x 2) (- planet_y 2) 4 4 (gfxRgb 255 255 255) 1)
+
+    # Draw Spacecraft Trajectory Trail
+    (let ti 0)
+    (while (< ti (length trail_x))
+      (let tx (get trail_x ti))
+      (let ty (get trail_y ti))
+      (gfxDrawPixel (floor tx) (floor ty) (gfxRgb 180 120 255))
+      (set! ti (+ ti 1)))
+
+    # Draw Spacecraft Probe (Green/Teal craft with velocity vector)
+    (gfxDrawRect (- px 4) (- py 4) 8 8 (gfxRgb 60 255 140) 1)
+    (gfxDrawLine px py (+ px (* vx 3.0)) (+ py (* vy 3.0)) (gfxRgb 255 240 50))
+
+    # Top HUD Telemetry Bar
+    (gfxDrawRect 0 0 560 30 (gfxRgb 16 18 32) 1)
+    (gfxDrawText 16 7 "ORBITAL SIMULATOR" (gfxRgb 100 220 255))
+    (gfxDrawText 180 7 (str_join (list "ALTITUDE: " (floor altitude) " km") "") (gfxRgb 255 220 80))
+    (gfxDrawText 350 7 (str_join (list "SPEED: " (floor (* speed 10.0)) " km/s") "") (gfxRgb 80 255 140))
+
+    # Bottom Flight Controls & Energy Bar
+    (gfxDrawRect 0 380 560 40 (gfxRgb 14 16 26) 1)
+    (gfxDrawText 16 384 "THRUST CONTROLS: Up: Prograde Burn | Down: Retrograde | Left/Right: Radial | R: Reset" (gfxRgb 180 195 220))
+    (gfxDrawText 16 402 (str_join (list "SPECIFIC ORBITAL ENERGY: " (floor orbital_energy) " MJ/kg") "") (gfxRgb 255 180 60))
+
+    (gamePresent))
+
+  (call print "Visual Orbital Simulator closed cleanly.")
+  (return 0))
