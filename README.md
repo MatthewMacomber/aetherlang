@@ -399,15 +399,6 @@ To remain pure-Zig, dependency-free, and maintainable, Aether deliberately draws
 
 ---
 
-## Historical Archive
-
-- **`archive/aetherv1/`**: Contains legacy v1 language specifications, initial prototype reports, and `v1.zip`.
-- **`archive/aetherv2/`**: Contains the ~100-file Rust compiler experiment and legacy C backend runtime.
-- **`archive/aetherv3/`**: Contains the frozen snapshot of Aether v3 prior to native compilation experiments.
-- **`archive/aetherv4_native/`**: Contains the experimental direct native x86-64 machine-code compiler, PE/ELF emission, and assembly test suites archived to prioritize language and ecosystem feature-completeness.
-
----
-
 ## License
 
 Aether is released under the MIT License. See [LICENSE](file:///LICENSE) for details.
